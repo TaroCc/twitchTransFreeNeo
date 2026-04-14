@@ -12,12 +12,14 @@ try:
     from ..utils.sound_manager import get_sound_manager, SoundManager
     from ..core.chat_monitor import ChatMonitor, ChatMessage
     from ..core.youtube_chat_monitor import YouTubeChatMonitor, PYTCHAT_AVAILABLE
+    from ..core.kick_chat_monitor import KickChatMonitor, WEBSOCKETS_AVAILABLE as KICK_AVAILABLE
     from .settings_dialog import SettingsDialog
 except ImportError:
     from twitchTransFreeNeo.utils.config_manager import ConfigManager
     from twitchTransFreeNeo.utils.sound_manager import get_sound_manager, SoundManager
     from twitchTransFreeNeo.core.chat_monitor import ChatMonitor, ChatMessage
     from twitchTransFreeNeo.core.youtube_chat_monitor import YouTubeChatMonitor, PYTCHAT_AVAILABLE
+    from twitchTransFreeNeo.core.kick_chat_monitor import KickChatMonitor, WEBSOCKETS_AVAILABLE as KICK_AVAILABLE
     from twitchTransFreeNeo.gui.settings_dialog import SettingsDialog
 
 class MainWindow:
@@ -27,6 +29,7 @@ class MainWindow:
         self.config_manager = ConfigManager()
         self.chat_monitor: Optional[ChatMonitor] = None
         self.youtube_monitor: Optional[YouTubeChatMonitor] = None
+        self.kick_monitor: Optional[KickChatMonitor] = None
         self.is_connected = False
         self.page: Optional[ft.Page] = None
 
@@ -49,6 +52,7 @@ class MainWindow:
         self.status_icon: Optional[ft.Icon] = None
         self.twitch_status_icon: Optional[ft.Icon] = None
         self.youtube_status_icon: Optional[ft.Icon] = None
+        self.kick_status_icon: Optional[ft.Icon] = None
 
         # データ
         self.messages: List[ChatMessage] = []
@@ -218,6 +222,18 @@ class MainWindow:
             padding=10,
         )
 
+    @staticmethod
+    def _is_twitch_enabled(platform: str) -> bool:
+        return platform in ["twitch", "both", "twitch_kick", "all"]
+
+    @staticmethod
+    def _is_youtube_enabled(platform: str) -> bool:
+        return platform in ["youtube", "both", "youtube_kick", "all"]
+
+    @staticmethod
+    def _is_kick_enabled(platform: str) -> bool:
+        return platform in ["kick", "twitch_kick", "youtube_kick", "all"]
+
     def _create_platform_indicator(self, platform: str) -> ft.Container:
         """プラットフォームインジケーターを作成"""
         if platform == "youtube":
@@ -230,14 +246,31 @@ class MainWindow:
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=4,
             )
-        elif platform == "both":
+        elif platform == "kick":
             return ft.Container(
                 content=ft.Row([
-                    ft.Icon(ft.Icons.LIVE_TV, color=ft.Colors.WHITE, size=14),
-                    ft.Text("+", color=ft.Colors.WHITE, size=12),
-                    ft.Icon(ft.Icons.SMART_DISPLAY, color=ft.Colors.WHITE, size=14),
-                    ft.Text("同時配信", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
-                ], spacing=2),
+                    ft.Icon(ft.Icons.SPORTS_ESPORTS, color=ft.Colors.WHITE, size=16),
+                    ft.Text("Kick", color=ft.Colors.WHITE, size=12, weight=ft.FontWeight.BOLD),
+                ], spacing=4),
+                bgcolor=ft.Colors.GREEN_700,
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                border_radius=4,
+            )
+        elif platform in ["both", "twitch_kick", "youtube_kick", "all"]:
+            icons = []
+            if self._is_twitch_enabled(platform):
+                icons.append(ft.Icon(ft.Icons.LIVE_TV, color=ft.Colors.WHITE, size=14))
+            if self._is_youtube_enabled(platform):
+                if icons:
+                    icons.append(ft.Text("+", color=ft.Colors.WHITE, size=10))
+                icons.append(ft.Icon(ft.Icons.SMART_DISPLAY, color=ft.Colors.WHITE, size=14))
+            if self._is_kick_enabled(platform):
+                if icons:
+                    icons.append(ft.Text("+", color=ft.Colors.WHITE, size=10))
+                icons.append(ft.Icon(ft.Icons.SPORTS_ESPORTS, color=ft.Colors.WHITE, size=14))
+            icons.append(ft.Text("同時配信", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD))
+            return ft.Container(
+                content=ft.Row(icons, spacing=2),
                 bgcolor=ft.Colors.PURPLE_700,
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=4,
@@ -493,6 +526,19 @@ class MainWindow:
             except Exception as e:
                 self._log_message(f"YouTube送信エラー: {e}")
 
+        # Kickに送信
+        if self.kick_monitor and self.kick_monitor.can_post:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                loop.create_task(
+                    self.kick_monitor.auth_manager.send_chat_message(
+                        self.kick_monitor.broadcaster_user_id, text
+                    )
+                )
+            except Exception as e:
+                self._log_message(f"Kick送信エラー: {e}")
+
     def _edit_quick_replies(self, e):
         """クイック返信の編集ダイアログを開く"""
         replies_text = ft.TextField(
@@ -721,6 +767,13 @@ class MainWindow:
             ], spacing=2),
             visible=False,
         )
+        self.kick_status_icon = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.SPORTS_ESPORTS, size=14, color=ft.Colors.GREY_500),
+                ft.Text("Kick", size=10, color=ft.Colors.GREY_500),
+            ], spacing=2),
+            visible=False,
+        )
 
         return ft.Container(
             content=ft.Row([
@@ -729,6 +782,7 @@ class MainWindow:
                 ft.Container(width=20),
                 self.twitch_status_icon,
                 self.youtube_status_icon,
+                self.kick_status_icon,
                 ft.Container(expand=True),
                 ft.Text("Ctrl+R: 接続 | Ctrl+,: 設定 | Ctrl+E: 出力 | F1: ヘルプ", size=10, color=ft.Colors.GREY_500),
             ], spacing=5),
@@ -773,10 +827,11 @@ class MainWindow:
         try:
             twitch_success = True
             youtube_success = True
+            kick_success = True
             status_parts = []
 
-            # Twitch接続（twitch または both の場合）
-            if platform in ["twitch", "both"]:
+            # Twitch接続
+            if self._is_twitch_enabled(platform):
                 self.chat_monitor = ChatMonitor(config, self._on_message_received)
                 success, error_msg = await self.chat_monitor.start()
                 if success:
@@ -791,8 +846,8 @@ class MainWindow:
                         await self._show_error_dialog("Twitch接続エラー", error_msg or "Twitchへの接続に失敗しました", hint=hint)
                         return
 
-            # YouTube接続（youtube または both の場合）
-            if platform in ["youtube", "both"]:
+            # YouTube接続
+            if self._is_youtube_enabled(platform):
                 if not PYTCHAT_AVAILABLE:
                     youtube_success = False
                     self._log_message("YouTube接続エラー: pytchatが利用できません")
@@ -821,8 +876,38 @@ class MainWindow:
                             )
                             return
 
+            # Kick接続
+            if self._is_kick_enabled(platform):
+                if not KICK_AVAILABLE:
+                    kick_success = False
+                    self._log_message("Kick接続エラー: websocketsが利用できません")
+                    if platform == "kick":
+                        await self._show_error_dialog(
+                            "Kick接続エラー",
+                            "websocketsライブラリが利用できません",
+                            hint="pip install websockets を実行してください。"
+                        )
+                        return
+                else:
+                    self.kick_monitor = KickChatMonitor(config, self._on_message_received)
+                    if self.kick_monitor.start():
+                        slug = config.get("kick_channel_slug", "")
+                        mode = "投稿可能" if self.kick_monitor.can_post else "読み取り専用"
+                        status_parts.append(f"Kick: {slug} ({mode})")
+                        self._log_message(f"Kick '{slug}' に接続しました ({mode})")
+                    else:
+                        kick_success = False
+                        self._log_message("Kick接続エラー: 接続に失敗しました")
+                        if platform == "kick":
+                            await self._show_error_dialog(
+                                "Kick接続エラー",
+                                "Kickへの接続に失敗しました",
+                                hint="チャンネルスラッグが正しいか確認してください。\n例: xqc, ninja"
+                            )
+                            return
+
             # 少なくとも1つ成功していれば接続状態とする
-            if twitch_success or youtube_success:
+            if twitch_success or youtube_success or kick_success:
                 self.is_connected = True
                 self.connect_button.text = "接続停止"
                 self.connect_button.icon = ft.Icons.STOP
@@ -835,15 +920,20 @@ class MainWindow:
                 self._start_connection_timer()
 
                 # プラットフォームステータス更新
-                if platform in ["twitch", "both"] and twitch_success:
+                if self._is_twitch_enabled(platform) and twitch_success:
                     self.twitch_status_icon.visible = True
                     self.twitch_status_icon.content.controls[0].color = ft.Colors.PURPLE_500
                     self.twitch_status_icon.content.controls[1].color = ft.Colors.PURPLE_500
 
-                if platform in ["youtube", "both"] and youtube_success:
+                if self._is_youtube_enabled(platform) and youtube_success:
                     self.youtube_status_icon.visible = True
                     self.youtube_status_icon.content.controls[0].color = ft.Colors.RED_700
                     self.youtube_status_icon.content.controls[1].color = ft.Colors.RED_700
+
+                if self._is_kick_enabled(platform) and kick_success:
+                    self.kick_status_icon.visible = True
+                    self.kick_status_icon.content.controls[0].color = ft.Colors.GREEN_700
+                    self.kick_status_icon.content.controls[1].color = ft.Colors.GREEN_700
 
                 self.page.update()
             else:
@@ -867,15 +957,19 @@ class MainWindow:
         errors = []
         config = self.config_manager.get_all()
 
-        if platform in ["twitch", "both"]:
+        if self._is_twitch_enabled(platform):
             if not config.get("twitch_channel"):
                 errors.append("Twitchチャンネル名が設定されていません")
             if not config.get("trans_oauth") and not config.get("view_only_mode", False):
                 errors.append("OAuthトークンが設定されていません（表示のみモードでない場合）")
 
-        if platform in ["youtube", "both"]:
+        if self._is_youtube_enabled(platform):
             if not config.get("youtube_video_id"):
                 errors.append("YouTube動画IDが設定されていません")
+
+        if self._is_kick_enabled(platform):
+            if not config.get("kick_channel_slug"):
+                errors.append("Kickチャンネルスラッグが設定されていません")
 
         return (len(errors) == 0, errors)
 
@@ -912,6 +1006,11 @@ class MainWindow:
                 self.youtube_monitor.stop()
                 self.youtube_monitor = None
 
+            # Kickモニターを停止
+            if self.kick_monitor:
+                self.kick_monitor.stop()
+                self.kick_monitor = None
+
             self.is_connected = False
             self.connect_button.text = "接続開始"
             self.connect_button.icon = ft.Icons.PLAY_ARROW
@@ -930,6 +1029,8 @@ class MainWindow:
                 self.twitch_status_icon.visible = False
             if self.youtube_status_icon:
                 self.youtube_status_icon.visible = False
+            if self.kick_status_icon:
+                self.kick_status_icon.visible = False
 
             # メッセージレートをリセット
             self.message_timestamps.clear()

@@ -134,6 +134,15 @@ class ConfigManager:
             "theme": "light",  # light, dark
             "font_size": 12,
             
+            # Kick設定
+            "kick_channel_slug": "",
+            "kick_client_id": "",
+            "kick_client_secret": "",
+            "kick_access_token": "",
+            "kick_refresh_token": "",
+            "kick_token_expires_at": 0,
+            "kick_post_interval": 2.0,
+
             # その他
             "view_only_mode": False,
             "debug": False,

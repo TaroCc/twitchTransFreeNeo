@@ -86,6 +86,12 @@ class SettingsDialog:
         self.youtube_post_interval_field: Optional[ft.TextField] = None
         self.youtube_daily_limit_field: Optional[ft.TextField] = None
         self.youtube_container: Optional[ft.Container] = None
+        # Kick設定
+        self.kick_channel_slug_field: Optional[ft.TextField] = None
+        self.kick_client_id_field: Optional[ft.TextField] = None
+        self.kick_client_secret_field: Optional[ft.TextField] = None
+        self.kick_auth_status_text: Optional[ft.Text] = None
+        self.kick_container: Optional[ft.Container] = None
 
         # フィルタ設定
         self.ignore_lang_field: Optional[ft.TextField] = None
@@ -246,9 +252,13 @@ class SettingsDialog:
             options=[
                 ft.DropdownOption("twitch", "Twitch のみ"),
                 ft.DropdownOption("youtube", "YouTube Live のみ"),
+                ft.DropdownOption("kick", "Kick のみ"),
                 ft.DropdownOption("both", "同時配信 (Twitch + YouTube)"),
+                ft.DropdownOption("twitch_kick", "同時配信 (Twitch + Kick)"),
+                ft.DropdownOption("youtube_kick", "同時配信 (YouTube + Kick)"),
+                ft.DropdownOption("all", "全プラットフォーム同時"),
             ],
-            width=300,
+            width=350,
             on_change=lambda e: self._on_platform_change(),
         )
 
@@ -258,7 +268,7 @@ class SettingsDialog:
             ft.Column([
                 self.platform_dropdown,
                 ft.Text(
-                    "※ YouTubeはOAuth認証で翻訳投稿も可能（未認証時は読み取り専用）\n※ 同時配信では両方のチャットを監視・翻訳します",
+                    "※ YouTube/KickはOAuth認証で翻訳投稿も可能（未認証時は読み取り専用）\n※ 同時配信では選択したプラットフォームのチャットを監視・翻訳します",
                     size=11, color=ft.Colors.GREY_600,
                 ),
             ], spacing=4),
@@ -310,7 +320,7 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="チャンネルに接続するために必要な設定です"
             ),
-            visible=(current_platform in ["twitch", "both"]),
+            visible=(current_platform in ["twitch", "both", "twitch_kick", "all"]),
         )
 
         # === YouTube設定 ===
@@ -440,7 +450,103 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="ライブ配信の動画IDと認証設定"
             ),
-            visible=(current_platform in ["youtube", "both"]),
+            visible=(current_platform in ["youtube", "both", "youtube_kick", "all"]),
+        )
+
+        # === Kick設定 ===
+        self.kick_channel_slug_field = ft.TextField(
+            label="Kickチャンネルスラッグ",
+            value=self.config.get("kick_channel_slug", ""),
+            hint_text="例: xqc, ninja（チャンネルURLの末尾）",
+            prefix_icon=ft.Icons.SPORTS_ESPORTS,
+            width=400,
+        )
+
+        self.kick_client_id_field = ft.TextField(
+            label="Kick Client ID",
+            value=self.config.get("kick_client_id", ""),
+            hint_text="Kick Developer Portalで取得",
+            prefix_icon=ft.Icons.APPS,
+            width=400,
+        )
+
+        self.kick_client_secret_field = ft.TextField(
+            label="Kick Client Secret",
+            value=self.config.get("kick_client_secret", ""),
+            password=True,
+            can_reveal_password=True,
+            hint_text="Kick Developer Portalで取得",
+            prefix_icon=ft.Icons.KEY,
+            width=400,
+        )
+
+        # Kick認証状態
+        kick_auth_status = self._check_kick_auth_status()
+        self.kick_auth_status_text = ft.Text(
+            kick_auth_status,
+            size=12,
+            color=ft.Colors.GREEN if "認証済み" in kick_auth_status else ft.Colors.ORANGE,
+        )
+
+        kick_auth_button = ft.ElevatedButton(
+            "Kick OAuth認証を開始",
+            icon=ft.Icons.LOGIN,
+            on_click=self._start_kick_auth,
+        )
+
+        kick_revoke_button = ft.OutlinedButton(
+            "認証を取り消し",
+            icon=ft.Icons.LOGOUT,
+            on_click=self._revoke_kick_auth,
+        )
+
+        kick_dev_portal_button = ft.ElevatedButton(
+            "Kick Developer Portal",
+            icon=ft.Icons.OPEN_IN_NEW,
+            on_click=lambda e: webbrowser.open("https://kick.com/settings/developer"),
+        )
+
+        self.kick_container = ft.Container(
+            content=self._create_settings_card(
+                "Kick接続設定",
+                ft.Icons.SPORTS_ESPORTS,
+                ft.Column([
+                    self.kick_channel_slug_field,
+                    ft.Text(
+                        "チャンネルURLの末尾がスラッグです\n例: https://kick.com/xqc → xqc",
+                        size=11, color=ft.Colors.GREY_600,
+                    ),
+                    ft.Divider(),
+                    ft.Text("投稿機能（任意）", weight=ft.FontWeight.W_500, size=13),
+                    ft.Text(
+                        "翻訳結果をKickチャットに投稿するにはOAuth認証が必要です\n読み取り専用なら不要です",
+                        size=11, color=ft.Colors.GREY_600,
+                    ),
+                    self.kick_client_id_field,
+                    self.kick_client_secret_field,
+                    ft.Row([
+                        kick_auth_button,
+                        kick_revoke_button,
+                    ]),
+                    self.kick_auth_status_text,
+                    ft.Divider(),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Kick Developer Portal", weight=ft.FontWeight.W_500, size=12),
+                            ft.Text(
+                                "Client IDとClient Secretを取得するには、\nKick Developer Portalでアプリを登録してください。\nRedirect URIには http://localhost:3000/callback を設定してください。",
+                                size=11, color=ft.Colors.GREY_600,
+                            ),
+                            kick_dev_portal_button,
+                        ], spacing=4),
+                        bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.GREEN),
+                        padding=10,
+                        border_radius=4,
+                    ),
+                ], spacing=8),
+                helper_text="Kickチャンネルに接続するための設定"
+            ),
+            visible=(current_platform in ["kick", "twitch_kick", "youtube_kick", "all"]),
         )
 
         # === 共通設定 ===
@@ -509,6 +615,7 @@ class SettingsDialog:
                 platform_card,
                 self.twitch_container,
                 self.youtube_container,
+                self.kick_container,
                 display_card,
                 misc_card,
             ], scroll=ft.ScrollMode.ALWAYS, spacing=12),
@@ -553,8 +660,9 @@ class SettingsDialog:
     def _on_platform_change(self):
         """プラットフォーム変更時のハンドラ"""
         platform = self.platform_dropdown.value
-        self.twitch_container.visible = platform in ["twitch", "both"]
-        self.youtube_container.visible = platform in ["youtube", "both"]
+        self.twitch_container.visible = platform in ["twitch", "both", "twitch_kick", "all"]
+        self.youtube_container.visible = platform in ["youtube", "both", "youtube_kick", "all"]
+        self.kick_container.visible = platform in ["kick", "twitch_kick", "youtube_kick", "all"]
         self.page.update()
 
     def _create_translation_tab(self) -> ft.Container:
@@ -1128,6 +1236,11 @@ class SettingsDialog:
         except ValueError:
             updated["youtube_daily_quota_limit"] = 180
 
+        # Kick設定
+        updated["kick_channel_slug"] = self.kick_channel_slug_field.value.strip()
+        updated["kick_client_id"] = self.kick_client_id_field.value.strip()
+        updated["kick_client_secret"] = self.kick_client_secret_field.value.strip()
+
         # 表示設定
         updated["trans_text_color"] = self.color_dropdown.value
         updated["show_by_name"] = self.show_name_checkbox.value
@@ -1327,6 +1440,78 @@ class SettingsDialog:
         except Exception as ex:
             self._show_auth_error(f"認証取り消しエラー: {ex}")
 
+    def _check_kick_auth_status(self) -> str:
+        """Kick認証状態をチェック"""
+        try:
+            from ..core.kick_auth import KickAuthManager, KICK_AUTH_AVAILABLE
+            if not KICK_AUTH_AVAILABLE:
+                return "⚠️ aiohttp未インストール（読み取り専用で動作可能）"
+
+            auth_manager = KickAuthManager(self.config)
+            if auth_manager.is_authenticated():
+                return "✅ 認証済み（投稿機能が利用可能）"
+            elif self.config.get("kick_client_id"):
+                return "ℹ️ Client ID設定済み（認証ボタンを押してください）"
+            else:
+                return "ℹ️ 未設定（読み取り専用で動作可能）"
+        except Exception as e:
+            return f"⚠️ 認証状態の確認エラー: {e}"
+
+    def _start_kick_auth(self, e):
+        """Kick OAuth認証を開始"""
+        client_id = self.kick_client_id_field.value.strip()
+        client_secret = self.kick_client_secret_field.value.strip()
+
+        if not client_id or not client_secret:
+            self._show_auth_error("Kick Client IDとClient Secretを入力してください")
+            return
+
+        try:
+            from ..core.kick_auth import KickAuthManager, KICK_AUTH_AVAILABLE
+
+            if not KICK_AUTH_AVAILABLE:
+                self._show_auth_error("aiohttpが利用できません。\npip install aiohttp")
+                return
+
+            temp_config = self.config.copy()
+            temp_config["kick_client_id"] = client_id
+            temp_config["kick_client_secret"] = client_secret
+
+            auth_manager = KickAuthManager(temp_config)
+
+            self.kick_auth_status_text.value = "🔄 認証中...ブラウザで認証してください"
+            self.kick_auth_status_text.color = ft.Colors.BLUE_700
+            self.page.update()
+
+            def auth_callback(success, message):
+                if success:
+                    self.kick_auth_status_text.value = "✅ 認証成功！設定を保存してください"
+                    self.kick_auth_status_text.color = ft.Colors.GREEN_700
+                    # トークンをconfigに保存
+                    token_config = auth_manager.get_token_config()
+                    self.config.update(token_config)
+                else:
+                    self.kick_auth_status_text.value = f"❌ 認証失敗: {message}"
+                    self.kick_auth_status_text.color = ft.Colors.RED_700
+                self.page.update()
+
+            auth_manager.start_auth_flow(callback=auth_callback)
+
+        except Exception as ex:
+            self._show_auth_error(f"Kick認証開始エラー: {ex}")
+
+    def _revoke_kick_auth(self, e):
+        """Kick認証を取り消す"""
+        try:
+            self.config["kick_access_token"] = ""
+            self.config["kick_refresh_token"] = ""
+            self.config["kick_token_expires_at"] = 0
+            self.kick_auth_status_text.value = "ℹ️ 認証を取り消しました"
+            self.kick_auth_status_text.color = ft.Colors.GREY_600
+            self.page.update()
+        except Exception as ex:
+            self._show_auth_error(f"Kick認証取り消しエラー: {ex}")
+
     def _get_youtube_account_info(self, auth_manager) -> Optional[str]:
         """YouTube認証済みアカウントの情報を取得"""
         try:
@@ -1503,6 +1688,14 @@ class SettingsDialog:
             self.youtube_client_id_field.value = imported_config.get("youtube_client_id", "")
         if "youtube_client_secret" in imported_config and self.youtube_client_secret_field:
             self.youtube_client_secret_field.value = imported_config.get("youtube_client_secret", "")
+
+        # Kick設定
+        if "kick_channel_slug" in imported_config and self.kick_channel_slug_field:
+            self.kick_channel_slug_field.value = imported_config.get("kick_channel_slug", "")
+        if "kick_client_id" in imported_config and self.kick_client_id_field:
+            self.kick_client_id_field.value = imported_config.get("kick_client_id", "")
+        if "kick_client_secret" in imported_config and self.kick_client_secret_field:
+            self.kick_client_secret_field.value = imported_config.get("kick_client_secret", "")
 
         # 翻訳設定
         if "lang_trans_to_home" in imported_config and self.home_lang_dropdown:
