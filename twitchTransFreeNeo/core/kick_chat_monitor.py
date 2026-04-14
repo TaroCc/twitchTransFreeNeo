@@ -49,7 +49,14 @@ except ImportError:
 
 # Pusher WebSocket設定
 PUSHER_URL = "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false"
-KICK_CHANNEL_API = "https://kick.com/api/v2/channels/{slug}"
+KICK_CHANNEL_API_V1 = "https://kick.com/api/v1/channels/{slug}"
+KICK_CHANNEL_API_V2 = "https://kick.com/api/v2/channels/{slug}"
+
+# Kick Pusherイベント名（複数パターン対応）
+KICK_CHAT_EVENTS = {
+    "App\\Events\\ChatMessageEvent",
+    "App\\Events\\ChatMessageSentEvent",
+}
 
 
 class KickChatMonitor:
@@ -172,34 +179,52 @@ class KickChatMonitor:
             print("[ERROR] Kick WebSocket再接続の最大試行回数に達しました")
 
     async def _get_channel_info(self) -> bool:
-        """Kickチャンネル情報を取得"""
-        url = KICK_CHANNEL_API.format(slug=self.channel_slug)
+        """Kickチャンネル情報を取得（v1/v2両方試行）"""
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        chatroom = data.get("chatroom", {})
-                        self.chatroom_id = chatroom.get("id")
-                        self.broadcaster_user_id = data.get("user_id") or data.get("id")
+        # v1とv2の両方を試行
+        urls = [
+            KICK_CHANNEL_API_V1.format(slug=self.channel_slug),
+            KICK_CHANNEL_API_V2.format(slug=self.channel_slug),
+        ]
 
-                        if self.chatroom_id:
-                            print(f"[INFO] Kick chatroom_id: {self.chatroom_id}")
-                            return True
+        for url in urls:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            # v2形式: chatroom.id
+                            chatroom = data.get("chatroom", {})
+                            chatroom_id = chatroom.get("id")
+                            # v1形式: chatroom_idが直接
+                            if not chatroom_id:
+                                chatroom_id = data.get("chatroom_id")
+                            # さらにフォールバック
+                            if not chatroom_id and isinstance(chatroom, dict):
+                                chatroom_id = chatroom.get("channel_id")
+
+                            self.broadcaster_user_id = data.get("user_id") or data.get("id") or data.get("user", {}).get("id")
+
+                            if chatroom_id:
+                                self.chatroom_id = chatroom_id
+                                print(f"[INFO] Kick chatroom_id: {self.chatroom_id} (from {url})")
+                                return True
+                            else:
+                                print(f"[WARNING] Kick chatroom_idが見つかりません (from {url})")
+                                if self.config.get("debug", False):
+                                    print(f"[DEBUG] API response keys: {list(data.keys())}")
                         else:
-                            print("[ERROR] Kick chatroom_idが見つかりません")
-                            return False
-                    else:
-                        print(f"[ERROR] Kickチャンネル情報取得失敗: HTTP {resp.status}")
-                        return False
-        except Exception as e:
-            print(f"[ERROR] Kickチャンネル情報取得エラー: {e}")
-            return False
+                            print(f"[WARNING] Kickチャンネル情報取得: HTTP {resp.status} (from {url})")
+            except Exception as e:
+                print(f"[WARNING] Kickチャンネル情報取得エラー ({url}): {e}")
+
+        print("[ERROR] Kickチャンネル情報を取得できませんでした（全APIエンドポイント失敗）")
+        return False
 
     async def _ws_connect(self):
         """Pusher WebSocket接続"""
@@ -239,7 +264,7 @@ class KickChatMonitor:
                     data = json.loads(msg)
                     event = data.get("event", "")
 
-                    if event == "App\\Events\\ChatMessageSentEvent":
+                    if event in KICK_CHAT_EVENTS:
                         # チャットメッセージを処理
                         event_data_str = data.get("data", "{}")
                         if isinstance(event_data_str, str):
@@ -258,10 +283,15 @@ class KickChatMonitor:
                         error_data = data.get("data", {})
                         print(f"[WARNING] Pusherエラー: {error_data}")
 
+                    else:
+                        # 未知のイベント（デバッグ用）
+                        if self.config.get("debug", False) and not event.startswith("pusher"):
+                            print(f"[DEBUG] Kick unknown event: {event}")
+
                 except asyncio.TimeoutError:
                     # キープアライブ ping を送信
                     try:
-                        await ws.send(json.dumps({"event": "pusher:ping"}))
+                        await ws.send(json.dumps({"event": "pusher:pong"}))
                     except Exception:
                         break
 
@@ -276,22 +306,40 @@ class KickChatMonitor:
             return
 
         try:
+            if self.config.get("debug", False):
+                print(f"[DEBUG] Kick raw message: {json.dumps(event_data, ensure_ascii=False)[:500]}")
+
             # Kickメッセージ構造を解析
-            # event_data には直接メッセージ情報が含まれる場合と、
-            # message/user 構造の場合がある
-            if "message" in event_data and isinstance(event_data["message"], dict):
-                message_data = event_data["message"]
-                user_data = event_data.get("user", event_data.get("sender", {}))
-                username = user_data.get("username", "Unknown")
-                original_content = message_data.get("message", message_data.get("content", ""))
-            elif "sender" in event_data:
-                username = event_data.get("sender", {}).get("username", "Unknown")
-                original_content = event_data.get("content", "")
-            elif "content" in event_data:
-                username = event_data.get("sender", {}).get("username",
-                           event_data.get("user", {}).get("username", "Unknown"))
-                original_content = event_data.get("content", "")
-            else:
+            # 主要な形式: {"id":..., "content":"...", "sender":{"username":"...",...}, "chatroom_id":...}
+            username = None
+            original_content = None
+
+            # sender.username を取得（最も一般的な形式）
+            sender = event_data.get("sender", {})
+            if isinstance(sender, dict):
+                username = sender.get("username") or sender.get("slug")
+
+            # user フォールバック
+            if not username:
+                user_data = event_data.get("user", {})
+                if isinstance(user_data, dict):
+                    username = user_data.get("username") or user_data.get("slug")
+
+            # content を取得
+            original_content = event_data.get("content")
+
+            # message フィールドのフォールバック（古いAPI形式）
+            if not original_content:
+                message_field = event_data.get("message")
+                if isinstance(message_field, str):
+                    original_content = message_field
+                elif isinstance(message_field, dict):
+                    original_content = message_field.get("content") or message_field.get("message")
+
+            if not username:
+                username = "Unknown"
+
+            if not original_content:
                 return
 
             if not original_content:

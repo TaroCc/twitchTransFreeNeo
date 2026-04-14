@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import threading
 import time
+import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, Optional, Tuple, Callable
 
@@ -32,6 +33,11 @@ KICK_REDIRECT_URI = "http://localhost:3000/callback"
 KICK_SCOPES = "user:read chat:write channel:read"
 
 
+class _IPv6HTTPServer(HTTPServer):
+    """IPv6対応HTTPServer"""
+    address_family = socket.AF_INET6
+
+
 class KickAuthManager:
     """Kick OAuth 2.1 + PKCE 認証マネージャー"""
 
@@ -43,6 +49,7 @@ class KickAuthManager:
         self.refresh_token = config.get("kick_refresh_token", "")
         self.token_expires_at = config.get("kick_token_expires_at", 0)
         self._callback_server: Optional[HTTPServer] = None
+        self._callback_server_v6: Optional[HTTPServer] = None
 
     def is_authenticated(self) -> bool:
         """認証済みかチェック"""
@@ -100,6 +107,7 @@ class KickAuthManager:
 
         class CallbackHandler(BaseHTTPRequestHandler):
             def do_GET(self):
+                print(f"[INFO] Kick OAuth callback received: {self.path}")
                 parsed = urllib.parse.urlparse(self.path)
                 if parsed.path != "/callback":
                     self.send_response(404)
@@ -119,7 +127,10 @@ class KickAuthManager:
                         f"<p>エラー: {error}</p><p>{error_desc}</p>"
                     )
                     if callback:
-                        callback(False, f"認証エラー: {error_desc}")
+                        try:
+                            callback(False, f"認証エラー: {error_desc}")
+                        except Exception as cb_err:
+                            print(f"[WARNING] Callback error: {cb_err}")
                     self._shutdown_server()
                     return
 
@@ -130,7 +141,10 @@ class KickAuthManager:
                         "<p>セキュリティ検証に失敗しました（state不一致）</p>"
                     )
                     if callback:
-                        callback(False, "セキュリティ検証失敗")
+                        try:
+                            callback(False, "セキュリティ検証失敗")
+                        except Exception as cb_err:
+                            print(f"[WARNING] Callback error: {cb_err}")
                     self._shutdown_server()
                     return
 
@@ -140,11 +154,15 @@ class KickAuthManager:
                         "<p>認証コードが取得できませんでした</p>"
                     )
                     if callback:
-                        callback(False, "認証コード取得失敗")
+                        try:
+                            callback(False, "認証コード取得失敗")
+                        except Exception as cb_err:
+                            print(f"[WARNING] Callback error: {cb_err}")
                     self._shutdown_server()
                     return
 
                 # コードをトークンに交換
+                print(f"[INFO] Kick OAuth code received, exchanging for token...")
                 success = auth_manager._exchange_code(received_code, code_verifier)
 
                 if success:
@@ -154,14 +172,20 @@ class KickAuthManager:
                         "<p>アプリに戻って設定を保存してください。</p>"
                     )
                     if callback:
-                        callback(True, "認証成功")
+                        try:
+                            callback(True, "認証成功")
+                        except Exception as cb_err:
+                            print(f"[WARNING] Callback error: {cb_err}")
                 else:
                     self._send_html_response(
                         "認証失敗",
                         "<p>トークンの取得に失敗しました。再試行してください。</p>"
                     )
                     if callback:
-                        callback(False, "トークン取得失敗")
+                        try:
+                            callback(False, "トークン取得失敗")
+                        except Exception as cb_err:
+                            print(f"[WARNING] Callback error: {cb_err}")
 
                 self._shutdown_server()
 
@@ -180,8 +204,8 @@ h1{{color:#53fc18;}}</style></head>
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
 
             def log_message(self, format, *args):
-                # HTTPサーバーのログを抑制
-                pass
+                # HTTPサーバーのログも出力（デバッグ用）
+                print(f"[INFO] Kick OAuth HTTP: {format % args}")
 
         try:
             # 既存のサーバーがあれば停止
@@ -190,12 +214,28 @@ h1{{color:#53fc18;}}</style></head>
                     auth_manager._callback_server.shutdown()
                 except Exception:
                     pass
+                auth_manager._callback_server = None
 
-            server = HTTPServer(("localhost", 3000), CallbackHandler)
+            # 127.0.0.1にバインド（IPv4確実）
+            # Kickのredirect_uriは http://localhost:3000/callback だが、
+            # ブラウザは localhost を 127.0.0.1 に解決するのが一般的
+            server = HTTPServer(("127.0.0.1", 3000), CallbackHandler)
             auth_manager._callback_server = server
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
-            print("[INFO] Kick OAuthコールバックサーバーを起動しました (localhost:3000)")
+            print("[INFO] Kick OAuthコールバックサーバーを起動しました (127.0.0.1:3000)")
+
+            # IPv6でもリッスンを試みる（localhost が ::1 に解決される環境対策）
+            try:
+                server6 = _IPv6HTTPServer(("::1", 3000), CallbackHandler)
+                auth_manager._callback_server_v6 = server6
+                thread6 = threading.Thread(target=server6.serve_forever, daemon=True)
+                thread6.start()
+                print("[INFO] IPv6コールバックサーバーも起動しました (::1:3000)")
+            except OSError:
+                # IPv6が使えない環境では無視
+                pass
+
         except OSError as e:
             print(f"[ERROR] コールバックサーバー起動エラー: {e}")
             if callback:
@@ -340,4 +380,13 @@ h1{{color:#53fc18;}}</style></head>
         self.access_token = ""
         self.refresh_token = ""
         self.token_expires_at = 0
+        # コールバックサーバーを停止
+        for server in [self._callback_server, self._callback_server_v6]:
+            if server:
+                try:
+                    server.shutdown()
+                except Exception:
+                    pass
+        self._callback_server = None
+        self._callback_server_v6 = None
         print("[INFO] Kick認証情報をクリアしました")

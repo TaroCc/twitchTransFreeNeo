@@ -1483,21 +1483,32 @@ class SettingsDialog:
             self.kick_auth_status_text.color = ft.Colors.BLUE_700
             self.page.update()
 
+            # コールバックはHTTPサーバースレッドから呼ばれるため、
+            # Flet UI更新はtry-exceptで保護する
+            page_ref = self.page
+
             def auth_callback(success, message):
-                if success:
-                    self.kick_auth_status_text.value = "✅ 認証成功！設定を保存してください"
-                    self.kick_auth_status_text.color = ft.Colors.GREEN_700
-                    # トークンをconfigに保存
-                    token_config = auth_manager.get_token_config()
-                    self.config.update(token_config)
-                else:
-                    self.kick_auth_status_text.value = f"❌ 認証失敗: {message}"
-                    self.kick_auth_status_text.color = ft.Colors.RED_700
-                self.page.update()
+                try:
+                    if success:
+                        self.kick_auth_status_text.value = "✅ 認証成功！設定を保存してください"
+                        self.kick_auth_status_text.color = ft.Colors.GREEN_700
+                        # トークンをconfigに保存
+                        token_config = auth_manager.get_token_config()
+                        self.config.update(token_config)
+                        print(f"[INFO] Kick認証成功: トークンを設定に保存しました")
+                    else:
+                        self.kick_auth_status_text.value = f"❌ 認証失敗: {message}"
+                        self.kick_auth_status_text.color = ft.Colors.RED_700
+                        print(f"[WARNING] Kick認証失敗: {message}")
+                    page_ref.update()
+                except Exception as cb_err:
+                    print(f"[WARNING] Kick認証コールバックUI更新エラー（トークン自体は取得済みの場合あり）: {cb_err}")
 
             auth_manager.start_auth_flow(callback=auth_callback)
 
         except Exception as ex:
+            import traceback
+            traceback.print_exc()
             self._show_auth_error(f"Kick認証開始エラー: {ex}")
 
     def _revoke_kick_auth(self, e):
