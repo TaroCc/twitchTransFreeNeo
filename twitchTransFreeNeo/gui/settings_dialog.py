@@ -462,6 +462,15 @@ class SettingsDialog:
             width=400,
         )
 
+        self.kick_chatroom_id_field = ft.TextField(
+            label="Chatroom ID（数値）",
+            value=str(self.config.get("kick_chatroom_id", "")) if self.config.get("kick_chatroom_id") else "",
+            hint_text="例: 668（ブラウザで確認 → 下記参照）",
+            prefix_icon=ft.Icons.TAG,
+            width=400,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
         self.kick_client_id_field = ft.TextField(
             label="Kick Client ID",
             value=self.config.get("kick_client_id", ""),
@@ -515,6 +524,25 @@ class SettingsDialog:
                     ft.Text(
                         "チャンネルURLの末尾がスラッグです\n例: https://kick.com/xqc → xqc",
                         size=11, color=ft.Colors.GREY_600,
+                    ),
+                    self.kick_chatroom_id_field,
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Chatroom IDの確認方法", weight=ft.FontWeight.W_500, size=12),
+                            ft.Text(
+                                "1. ブラウザで https://kick.com/{チャンネル名} を開く\n"
+                                "2. F12キーでDevToolsを開く → Networkタブ\n"
+                                "3. フィルタに「pusher」と入力\n"
+                                "4. WebSocket接続のMessagesで \"chatrooms.数字\" を確認\n"
+                                "   → この「数字」がChatroom IDです\n\n"
+                                "または: DevToolsのConsoleで以下を実行\n"
+                                "  fetch('/api/v2/channels/{スラッグ}').then(r=>r.json()).then(d=>console.log(d.chatroom.id))",
+                                size=11, color=ft.Colors.GREY_600,
+                            ),
+                        ], spacing=4),
+                        bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.BLUE),
+                        padding=10,
+                        border_radius=4,
                     ),
                     ft.Divider(),
                     ft.Text("投稿機能（任意）", weight=ft.FontWeight.W_500, size=13),
@@ -1238,6 +1266,14 @@ class SettingsDialog:
 
         # Kick設定
         updated["kick_channel_slug"] = self.kick_channel_slug_field.value.strip()
+        chatroom_id_str = self.kick_chatroom_id_field.value.strip()
+        if chatroom_id_str:
+            try:
+                updated["kick_chatroom_id"] = int(chatroom_id_str)
+            except ValueError:
+                updated["kick_chatroom_id"] = 0
+        else:
+            updated["kick_chatroom_id"] = 0
         updated["kick_client_id"] = self.kick_client_id_field.value.strip()
         updated["kick_client_secret"] = self.kick_client_secret_field.value.strip()
 
@@ -1703,6 +1739,9 @@ class SettingsDialog:
         # Kick設定
         if "kick_channel_slug" in imported_config and self.kick_channel_slug_field:
             self.kick_channel_slug_field.value = imported_config.get("kick_channel_slug", "")
+        if "kick_chatroom_id" in imported_config and self.kick_chatroom_id_field:
+            val = imported_config.get("kick_chatroom_id", 0)
+            self.kick_chatroom_id_field.value = str(val) if val else ""
         if "kick_client_id" in imported_config and self.kick_client_id_field:
             self.kick_client_id_field.value = imported_config.get("kick_client_id", "")
         if "kick_client_secret" in imported_config and self.kick_client_secret_field:

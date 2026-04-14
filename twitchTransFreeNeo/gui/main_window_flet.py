@@ -968,8 +968,8 @@ class MainWindow:
                 errors.append("YouTube動画IDが設定されていません")
 
         if self._is_kick_enabled(platform):
-            if not config.get("kick_channel_slug"):
-                errors.append("Kickチャンネルスラッグが設定されていません")
+            if not config.get("kick_channel_slug") and not config.get("kick_chatroom_id"):
+                errors.append("Kickチャンネルスラッグまたはchatroom IDが設定されていません")
 
         return (len(errors) == 0, errors)
 

@@ -136,6 +136,7 @@ class ConfigManager:
             
             # Kick設定
             "kick_channel_slug": "",
+            "kick_chatroom_id": 0,
             "kick_client_id": "",
             "kick_client_secret": "",
             "kick_access_token": "",

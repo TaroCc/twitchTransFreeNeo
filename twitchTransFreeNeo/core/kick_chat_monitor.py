@@ -75,7 +75,9 @@ class KickChatMonitor:
         self._monitor_thread: Optional[threading.Thread] = None
 
         self.channel_slug = config.get("kick_channel_slug", "")
-        self.chatroom_id: Optional[int] = None
+        # 手動設定されたchatroom_idを優先
+        manual_id = config.get("kick_chatroom_id", 0)
+        self.chatroom_id: Optional[int] = manual_id if manual_id else None
         self.broadcaster_user_id: Optional[int] = None
 
         # 表示のみモード
@@ -114,8 +116,8 @@ class KickChatMonitor:
             print("[ERROR] aiohttpが利用できないため、Kick監視を開始できません")
             return False
 
-        if not self.channel_slug:
-            print("[ERROR] Kickチャンネルスラッグが設定されていません")
+        if not self.channel_slug and not self.chatroom_id:
+            print("[ERROR] Kickチャンネルスラッグまたはchatroom IDが設定されていません")
             return False
 
         try:
@@ -228,12 +230,16 @@ class KickChatMonitor:
 
     async def _ws_connect(self):
         """Pusher WebSocket接続"""
-        # チャンネル情報を取得
+        # チャンネル情報を取得（手動設定がなければAPI試行）
         if not self.chatroom_id:
             if not await self._get_channel_info():
-                raise ConnectionError("Kickチャンネル情報の取得に失敗しました")
+                raise ConnectionError(
+                    "Kickチャンネル情報の取得に失敗しました。\n"
+                    "設定画面でChatroom IDを手動入力してください。\n"
+                    "（確認方法は設定画面に記載）"
+                )
 
-        print(f"[INFO] Kick Pusher WebSocketに接続中...")
+        print(f"[INFO] Kick Pusher WebSocketに接続中... (chatroom_id={self.chatroom_id})")
 
         async with websockets.connect(PUSHER_URL) as ws:
             # 接続確立を待機
@@ -247,15 +253,21 @@ class KickChatMonitor:
             else:
                 raise ConnectionError(f"予期しないPusherイベント: {data.get('event')}")
 
-            # チャットルームチャンネルを購読
-            subscribe_msg = json.dumps({
-                "event": "pusher:subscribe",
-                "data": {
-                    "channel": f"chatrooms.{self.chatroom_id}"
-                }
-            })
-            await ws.send(subscribe_msg)
-            print(f"[INFO] Kick chatrooms.{self.chatroom_id} を購読中...")
+            # チャットルームチャンネルを購読（v2とレガシー両方）
+            channels_to_subscribe = [
+                f"chatrooms.{self.chatroom_id}.v2",
+                f"chatrooms.{self.chatroom_id}",
+            ]
+            for channel_name in channels_to_subscribe:
+                subscribe_msg = json.dumps({
+                    "event": "pusher:subscribe",
+                    "data": {
+                        "auth": "",
+                        "channel": channel_name
+                    }
+                })
+                await ws.send(subscribe_msg)
+                print(f"[INFO] Kick '{channel_name}' を購読中...")
 
             # メッセージ受信ループ
             while self.is_running:
