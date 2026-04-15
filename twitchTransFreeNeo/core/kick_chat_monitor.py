@@ -8,6 +8,7 @@ Pusher WebSocketを使用してKick.comのチャットを監視・翻訳
 
 import asyncio
 import json
+import re
 import threading
 import time
 from datetime import datetime
@@ -399,6 +400,12 @@ class KickChatMonitor:
                     if self.config.get("debug", False):
                         print(f"[DEBUG] 自己メッセージをスキップ: {username}")
                     return
+
+            # 翻訳済みメッセージを無視（[ja] [en] 等の言語タグで始まるメッセージ）
+            if re.match(r'^\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]\s', original_content):
+                if self.config.get("debug", False):
+                    print(f"[DEBUG] 翻訳済みメッセージをスキップ: {original_content[:50]}")
+                return
 
             # ユーザーフィルター
             if self.processor.should_ignore_user(username):

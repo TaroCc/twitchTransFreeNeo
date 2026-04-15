@@ -240,10 +240,14 @@ if TWITCHIO_AVAILABLE:
             original_content = msg.content
             timestamp = msg.timestamp.strftime("%H:%M:%S") if msg.timestamp else ""
             
+            # 翻訳済みメッセージを無視（[ja] [en] 等の言語タグで始まるメッセージ）
+            if re.match(r'^\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]\s', original_content):
+                return
+
             # ユーザーフィルター
             if self.processor.should_ignore_user(username):
                 return
-            
+
             # メッセージフィルター
             if self.processor.should_ignore_message(original_content):
                 return
