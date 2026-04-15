@@ -342,29 +342,33 @@ h1{{color:#53fc18;}}</style></head>
             "Content-Type": "application/json",
         }
         payload = {
-            "broadcaster_user_id": broadcaster_user_id,
             "content": content,
-            "type": "user",
+            "type": "bot",
         }
+        # broadcaster_user_idがある場合のみ付与
+        if broadcaster_user_id:
+            payload["broadcaster_user_id"] = broadcaster_user_id
+
+        url = f"{KICK_API_BASE_URL}/public/v1/chat"
+        print(f"[DEBUG] Kick POST {url} broadcaster_user_id={broadcaster_user_id}")
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{KICK_API_BASE_URL}/public/v1/chat",
-                    headers=headers,
-                    json=payload
-                ) as resp:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    body = await resp.text()
                     if resp.status in (200, 201):
+                        print(f"[INFO] Kick投稿成功")
                         return True, None
                     else:
-                        body = await resp.text()
                         error_msg = f"HTTP {resp.status}: {body}"
+                        print(f"[WARNING] Kick投稿失敗: {error_msg}")
                         # 401の場合はトークンをリフレッシュして再試行
                         if resp.status == 401 and self.refresh_token:
                             if self._refresh_access_token():
                                 return await self.send_chat_message(broadcaster_user_id, content)
                         return False, error_msg
         except Exception as e:
+            print(f"[ERROR] Kick投稿例外: {e}")
             return False, str(e)
 
     def get_token_config(self) -> Dict[str, Any]:

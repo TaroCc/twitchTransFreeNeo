@@ -263,14 +263,14 @@ class KickChatMonitor:
 
     async def _ws_connect(self):
         """Pusher WebSocket接続"""
-        # チャンネル情報を取得（手動設定がなければAPI試行）
-        if not self.chatroom_id:
+        # チャンネル情報を取得（chatroom_idまたはbroadcaster_user_idが不足している場合）
+        if not self.chatroom_id or (not self.broadcaster_user_id and self.channel_slug):
             if not await self._get_channel_info():
-                raise ConnectionError(
-                    "Kickチャンネル情報の取得に失敗しました。\n"
-                    "設定画面でChatroom IDを手動入力してください。\n"
-                    "（確認方法は設定画面に記載）"
-                )
+                if not self.chatroom_id:
+                    raise ConnectionError(
+                        "Kickチャンネル情報の取得に失敗しました。\n"
+                        "設定画面でChatroom IDを手動入力してください。"
+                    )
 
         print(f"[INFO] Kick Pusher WebSocketに接続中... (chatroom_id={self.chatroom_id})")
 
@@ -484,6 +484,10 @@ class KickChatMonitor:
     async def _post_translation(self, chat_message: ChatMessage):
         """翻訳結果をKickチャットに投稿"""
         if not self.can_post or not self.auth_manager or not self.broadcaster_user_id:
+            if self.config.get("debug", False):
+                print(f"[DEBUG] Kick投稿スキップ: can_post={self.can_post}, "
+                      f"auth_manager={self.auth_manager is not None}, "
+                      f"broadcaster_user_id={self.broadcaster_user_id}")
             return
 
         # 投稿間隔チェック

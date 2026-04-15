@@ -548,15 +548,19 @@ class MainWindow:
 
             def _kick_send():
                 try:
-                    asyncio.run(
+                    success, error = asyncio.run(
                         kick_monitor.auth_manager.send_chat_message(
                             kick_monitor.broadcaster_user_id, text
                         )
                     )
+                    if not success:
+                        self._log_message(f"Kick送信エラー: {error}")
                 except Exception as e:
                     self._log_message(f"Kick送信エラー: {e}")
 
             threading.Thread(target=_kick_send, daemon=True).start()
+        elif self.kick_monitor and not self.kick_monitor.can_post:
+            self._log_message("Kick: 投稿にはOAuth認証が必要です")
 
     def _edit_quick_replies(self, e):
         """クイック返信の編集ダイアログを開く"""
