@@ -54,6 +54,8 @@ class KickAuthManager:
         self._aiohttp_session: Optional[Any] = None  # 再利用可能なHTTPセッション
         self._session_loop: Optional[Any] = None  # セッションが属するイベントループ
         self._is_refreshing = False  # リフレッシュ中フラグ（二重リフレッシュ防止）
+        self.authenticated_username: Optional[str] = None  # 認証済みユーザー名（自己メッセージ除外用）
+        self.authenticated_user_id: Optional[int] = None  # 認証済みユーザーID
 
     def is_authenticated(self) -> bool:
         """認証済みかチェック"""
@@ -125,6 +127,40 @@ class KickAuthManager:
             self._is_refreshing = False
         # 非同期リフレッシュ失敗時は同期版にフォールバック
         return self._refresh_access_token()
+
+    async def fetch_authenticated_user(self) -> Optional[str]:
+        """認証済みユーザーの情報を取得（ユーザー名を返す）"""
+        if not self.access_token:
+            return None
+        try:
+            session = await self._get_session()
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            async with session.get(
+                f"{KICK_API_BASE_URL}/public/v1/users",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # レスポンス形式: {"data": [{"user_id": ..., "name": ..., ...}]}
+                    users = data.get("data", [])
+                    if users and isinstance(users, list):
+                        user = users[0]
+                        self.authenticated_username = user.get("name") or user.get("username")
+                        self.authenticated_user_id = user.get("user_id") or user.get("id")
+                    elif isinstance(data, dict) and data.get("name"):
+                        # フラットな形式のフォールバック
+                        self.authenticated_username = data.get("name") or data.get("username")
+                        self.authenticated_user_id = data.get("user_id") or data.get("id")
+                    if self.authenticated_username:
+                        print(f"[INFO] Kick認証ユーザー: {self.authenticated_username} (ID: {self.authenticated_user_id})")
+                        return self.authenticated_username
+                else:
+                    body = await resp.text()
+                    print(f"[WARNING] Kickユーザー情報取得失敗: HTTP {resp.status}: {body[:200]}")
+        except Exception as e:
+            print(f"[WARNING] Kickユーザー情報取得エラー: {e}")
+        return None
 
     async def _get_session(self) -> 'aiohttp.ClientSession':
         """再利用可能なaiohttpセッションを取得（ループ変更時は再作成）"""

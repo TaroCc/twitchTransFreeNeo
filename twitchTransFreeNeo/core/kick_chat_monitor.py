@@ -272,6 +272,10 @@ class KickChatMonitor:
                         "設定画面でChatroom IDを手動入力してください。"
                     )
 
+        # 認証済みユーザー名を取得（自己メッセージ除外用）
+        if self.auth_manager and self.can_post and not self.auth_manager.authenticated_username:
+            await self.auth_manager.fetch_authenticated_user()
+
         print(f"[INFO] Kick Pusher WebSocketに接続中... (chatroom_id={self.chatroom_id})")
 
         async with websockets.connect(PUSHER_URL) as ws:
@@ -387,10 +391,14 @@ class KickChatMonitor:
             if not original_content:
                 return
 
-            if not original_content:
-                return
-
             timestamp = datetime.now()
+
+            # 自分自身のメッセージを無視（翻訳の翻訳を防止）
+            if self.auth_manager and self.auth_manager.authenticated_username:
+                if username.lower() == self.auth_manager.authenticated_username.lower():
+                    if self.config.get("debug", False):
+                        print(f"[DEBUG] 自己メッセージをスキップ: {username}")
+                    return
 
             # ユーザーフィルター
             if self.processor.should_ignore_user(username):
