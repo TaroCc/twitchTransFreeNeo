@@ -168,11 +168,24 @@ class MainWindow:
             ], spacing=0, expand=True)
         )
 
+    def _get_display_channel_and_bot(self, config: dict) -> tuple:
+        """プラットフォームに応じた表示用チャンネル名・ボット名を取得"""
+        platform = config.get("platform", "twitch")
+        if platform == "kick":
+            channel = config.get("kick_channel_slug", "")
+            bot_user = "OAuth認証" if config.get("kick_access_token") else "読み取り専用"
+        elif platform == "youtube":
+            channel = config.get("youtube_video_id", "")
+            bot_user = "YouTube" if config.get("youtube_credentials_json") else "読み取り専用"
+        else:
+            channel = config.get("twitch_channel", "")
+            bot_user = config.get("trans_username", "")
+        return channel, bot_user
+
     def _create_toolbar(self) -> ft.Container:
         """ツールバー作成"""
         config = self.config_manager.get_all()
-        channel = config.get("twitch_channel", "")
-        bot_user = config.get("trans_username", "")
+        channel, bot_user = self._get_display_channel_and_bot(config)
         platform = config.get("platform", "twitch")
 
         self.connect_button = ft.ElevatedButton(
@@ -528,16 +541,22 @@ class MainWindow:
 
         # Kickに送信
         if self.kick_monitor and self.kick_monitor.can_post:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                loop.create_task(
-                    self.kick_monitor.auth_manager.send_chat_message(
-                        self.kick_monitor.broadcaster_user_id, text
+            import asyncio
+            import threading
+
+            kick_monitor = self.kick_monitor
+
+            def _kick_send():
+                try:
+                    asyncio.run(
+                        kick_monitor.auth_manager.send_chat_message(
+                            kick_monitor.broadcaster_user_id, text
+                        )
                     )
-                )
-            except Exception as e:
-                self._log_message(f"Kick送信エラー: {e}")
+                except Exception as e:
+                    self._log_message(f"Kick送信エラー: {e}")
+
+            threading.Thread(target=_kick_send, daemon=True).start()
 
     def _edit_quick_replies(self, e):
         """クイック返信の編集ダイアログを開く"""
@@ -1521,8 +1540,7 @@ class MainWindow:
         """設定からUIを更新"""
         config = self.config_manager.get_all()
 
-        channel = config.get("twitch_channel", "")
-        bot_user = config.get("trans_username", "")
+        channel, bot_user = self._get_display_channel_and_bot(config)
         platform = config.get("platform", "twitch")
 
         if self.channel_text:
