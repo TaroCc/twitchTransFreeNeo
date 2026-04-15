@@ -463,12 +463,24 @@ class SettingsDialog:
         )
 
         self.kick_chatroom_id_field = ft.TextField(
-            label="Chatroom ID（数値）",
+            label="Chatroom ID（数値・通常は自動取得）",
             value=str(self.config.get("kick_chatroom_id", "")) if self.config.get("kick_chatroom_id") else "",
-            hint_text="例: 668（ブラウザで確認 → 下記参照）",
+            hint_text="通常は空欄でOK（接続時に自動取得）",
             prefix_icon=ft.Icons.TAG,
-            width=400,
+            width=300,
             keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
+        self.kick_chatroom_detect_button = ft.ElevatedButton(
+            "自動取得",
+            icon=ft.Icons.SEARCH,
+            on_click=self._detect_kick_chatroom_id,
+        )
+
+        self.kick_chatroom_status_text = ft.Text(
+            "",
+            size=11,
+            color=ft.Colors.GREY_600,
         )
 
         self.kick_client_id_field = ft.TextField(
@@ -525,24 +537,15 @@ class SettingsDialog:
                         "チャンネルURLの末尾がスラッグです\n例: https://kick.com/xqc → xqc",
                         size=11, color=ft.Colors.GREY_600,
                     ),
-                    self.kick_chatroom_id_field,
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Text("Chatroom IDの確認方法", weight=ft.FontWeight.W_500, size=12),
-                            ft.Text(
-                                "1. ブラウザで https://kick.com/{チャンネル名} を開く\n"
-                                "2. F12キーでDevToolsを開く → Networkタブ\n"
-                                "3. フィルタに「pusher」と入力\n"
-                                "4. WebSocket接続のMessagesで \"chatrooms.数字\" を確認\n"
-                                "   → この「数字」がChatroom IDです\n\n"
-                                "または: DevToolsのConsoleで以下を実行\n"
-                                "  fetch('/api/v2/channels/{スラッグ}').then(r=>r.json()).then(d=>console.log(d.chatroom.id))",
-                                size=11, color=ft.Colors.GREY_600,
-                            ),
-                        ], spacing=4),
-                        bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.BLUE),
-                        padding=10,
-                        border_radius=4,
+                    ft.Row([
+                        self.kick_chatroom_id_field,
+                        self.kick_chatroom_detect_button,
+                    ], alignment=ft.MainAxisAlignment.START),
+                    self.kick_chatroom_status_text,
+                    ft.Text(
+                        "通常は空欄のままで接続時に自動取得されます。\n"
+                        "取得に失敗する場合は「自動取得」ボタンで手動取得できます。",
+                        size=11, color=ft.Colors.GREY_600,
                     ),
                     ft.Divider(),
                     ft.Text("投稿機能（任意）", weight=ft.FontWeight.W_500, size=13),
@@ -1475,6 +1478,48 @@ class SettingsDialog:
 
         except Exception as ex:
             self._show_auth_error(f"認証取り消しエラー: {ex}")
+
+    def _detect_kick_chatroom_id(self, e):
+        """KickチャンネルのChatroom IDを自動取得"""
+        slug = self.kick_channel_slug_field.value.strip()
+        if not slug:
+            self.kick_chatroom_status_text.value = "⚠️ チャンネルスラッグを先に入力してください"
+            self.kick_chatroom_status_text.color = ft.Colors.ORANGE
+            try:
+                self.page.update()
+            except Exception:
+                pass
+            return
+
+        self.kick_chatroom_status_text.value = "🔍 取得中..."
+        self.kick_chatroom_status_text.color = ft.Colors.BLUE
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+        import threading
+
+        def _fetch():
+            try:
+                from ..core.kick_chat_monitor import KickChatMonitor
+                chatroom_id = KickChatMonitor.fetch_chatroom_id(slug)
+                if chatroom_id:
+                    self.kick_chatroom_id_field.value = str(chatroom_id)
+                    self.kick_chatroom_status_text.value = f"✅ 取得成功: {chatroom_id}"
+                    self.kick_chatroom_status_text.color = ft.Colors.GREEN
+                else:
+                    self.kick_chatroom_status_text.value = "❌ 取得失敗（チャンネルが見つかりません）"
+                    self.kick_chatroom_status_text.color = ft.Colors.RED
+            except Exception as ex:
+                self.kick_chatroom_status_text.value = f"❌ エラー: {ex}"
+                self.kick_chatroom_status_text.color = ft.Colors.RED
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _check_kick_auth_status(self) -> str:
         """Kick認証状態をチェック"""

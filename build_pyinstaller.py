@@ -55,6 +55,7 @@ def build_macos(arch=None):
         "--clean",
         "--add-data=twitchTransFreeNeo:twitchTransFreeNeo",
         "--collect-data=certifi",  # SSL証明書をバンドル
+        "--collect-all=curl_cffi",  # Cloudflareバイパス用
         "run.py",
     ]
 
@@ -101,6 +102,7 @@ def build_windows():
         "--clean",
         "--add-data=twitchTransFreeNeo;twitchTransFreeNeo",
         "--collect-data=certifi",  # SSL証明書をバンドル
+        "--collect-all=curl_cffi",  # Cloudflareバイパス用
         "run.py",
     ]
 
@@ -140,6 +142,7 @@ def build_linux():
         "--clean",
         "--add-data=twitchTransFreeNeo:twitchTransFreeNeo",
         "--collect-data=certifi",  # SSL証明書をバンドル
+        "--collect-all=curl_cffi",  # Cloudflareバイパス用
         "run.py",
     ]
 

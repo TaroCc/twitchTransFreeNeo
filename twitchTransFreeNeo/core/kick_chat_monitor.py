@@ -34,6 +34,13 @@ except ImportError:
     def distinct_emoji_list(text):
         return []
 
+# curl_cffi（Cloudflareバイパス用）
+try:
+    from curl_cffi import requests as cffi_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+
 try:
     from .chat_monitor import ChatMessage, MessageProcessor
     from .translator import TranslationEngine, LanguageDetector
@@ -181,52 +188,78 @@ class KickChatMonitor:
             print("[ERROR] Kick WebSocket再接続の最大試行回数に達しました")
 
     async def _get_channel_info(self) -> bool:
-        """Kickチャンネル情報を取得（v1/v2両方試行）"""
+        """Kickチャンネル情報を取得（curl_cffi優先、フォールバックあり）"""
+        # 方法1: curl_cffi でCloudflareバイパス（最も確実）
+        if CURL_CFFI_AVAILABLE:
+            try:
+                chatroom_id = await self._get_chatroom_id_via_curl_cffi(self.channel_slug)
+                if chatroom_id:
+                    self.chatroom_id = chatroom_id
+                    return True
+            except Exception as e:
+                print(f"[WARNING] curl_cffi でのchatroom_id取得失敗: {e}")
+
+        # 方法2: 通常のHTTPリクエスト（v1/v2 API）
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Accept": "application/json",
             "Accept-Language": "en-US,en;q=0.9",
         }
-
-        # v1とv2の両方を試行
         urls = [
             KICK_CHANNEL_API_V1.format(slug=self.channel_slug),
             KICK_CHANNEL_API_V2.format(slug=self.channel_slug),
         ]
-
         for url in urls:
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            # v2形式: chatroom.id
                             chatroom = data.get("chatroom", {})
-                            chatroom_id = chatroom.get("id")
-                            # v1形式: chatroom_idが直接
+                            chatroom_id = chatroom.get("id") if isinstance(chatroom, dict) else None
                             if not chatroom_id:
                                 chatroom_id = data.get("chatroom_id")
-                            # さらにフォールバック
-                            if not chatroom_id and isinstance(chatroom, dict):
-                                chatroom_id = chatroom.get("channel_id")
-
                             self.broadcaster_user_id = data.get("user_id") or data.get("id") or data.get("user", {}).get("id")
-
                             if chatroom_id:
                                 self.chatroom_id = chatroom_id
                                 print(f"[INFO] Kick chatroom_id: {self.chatroom_id} (from {url})")
                                 return True
-                            else:
-                                print(f"[WARNING] Kick chatroom_idが見つかりません (from {url})")
-                                if self.config.get("debug", False):
-                                    print(f"[DEBUG] API response keys: {list(data.keys())}")
                         else:
-                            print(f"[WARNING] Kickチャンネル情報取得: HTTP {resp.status} (from {url})")
+                            if self.config.get("debug", False):
+                                print(f"[DEBUG] Kickチャンネル情報: HTTP {resp.status} (from {url})")
             except Exception as e:
-                print(f"[WARNING] Kickチャンネル情報取得エラー ({url}): {e}")
+                if self.config.get("debug", False):
+                    print(f"[DEBUG] Kickチャンネル情報取得エラー ({url}): {e}")
 
-        print("[ERROR] Kickチャンネル情報を取得できませんでした（全APIエンドポイント失敗）")
+        print("[ERROR] Kickチャンネル情報を取得できませんでした")
         return False
+
+    async def _get_chatroom_id_via_curl_cffi(self, slug: str) -> Optional[int]:
+        """curl_cffiでCloudflareをバイパスしてchatroom_idを取得"""
+        import asyncio
+
+        def _fetch():
+            url = f"https://kick.com/api/v1/channels/{slug}"
+            resp = cffi_requests.get(url, impersonate="chrome", timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                chatroom = data.get("chatroom", {})
+                chatroom_id = chatroom.get("id") if isinstance(chatroom, dict) else None
+                broadcaster_id = data.get("user_id") or data.get("id")
+                return chatroom_id, broadcaster_id
+            return None, None
+
+        # 同期関数をスレッドプールで実行
+        loop = asyncio.get_event_loop()
+        chatroom_id, broadcaster_id = await loop.run_in_executor(None, _fetch)
+
+        if chatroom_id:
+            if broadcaster_id:
+                self.broadcaster_user_id = broadcaster_id
+            print(f"[INFO] Kick chatroom_id: {chatroom_id} (自動取得)")
+            return chatroom_id
+
+        return None
 
     async def _ws_connect(self):
         """Pusher WebSocket接続"""
@@ -575,6 +608,36 @@ class KickChatMonitor:
             self.tts_engine.stop()
 
         print("[INFO] Kick チャット監視を停止しました")
+
+    @staticmethod
+    def fetch_chatroom_id(slug: str) -> Optional[int]:
+        """チャンネルスラッグからchatroom_idを取得（同期・静的メソッド）
+
+        GUIの設定画面などから直接呼び出し可能。
+        curl_cffiでCloudflareをバイパスしてKick APIにアクセスする。
+        """
+        if not CURL_CFFI_AVAILABLE:
+            print("[WARNING] curl_cffiが利用できません。chatroom_idの自動取得はできません。")
+            return None
+
+        try:
+            url = f"https://kick.com/api/v1/channels/{slug}"
+            resp = cffi_requests.get(url, impersonate="chrome", timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                chatroom = data.get("chatroom", {})
+                chatroom_id = chatroom.get("id") if isinstance(chatroom, dict) else None
+                if chatroom_id:
+                    print(f"[INFO] Kick chatroom_id取得成功: {slug} → {chatroom_id}")
+                    return chatroom_id
+                else:
+                    print(f"[WARNING] chatroom_idが見つかりません: {slug}")
+            else:
+                print(f"[WARNING] Kick API: HTTP {resp.status_code} for {slug}")
+        except Exception as e:
+            print(f"[ERROR] chatroom_id取得エラー: {e}")
+
+        return None
 
     def update_config(self, config: Dict[str, Any]):
         """設定を更新"""
