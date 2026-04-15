@@ -394,13 +394,6 @@ class KickChatMonitor:
 
             timestamp = datetime.now()
 
-            # 自分自身のメッセージを無視（翻訳の翻訳を防止）
-            if self.auth_manager and self.auth_manager.authenticated_username:
-                if username.lower() == self.auth_manager.authenticated_username.lower():
-                    if self.config.get("debug", False):
-                        print(f"[DEBUG] 自己メッセージをスキップ: {username}")
-                    return
-
             # 翻訳済みメッセージを無視（[ja] [en] 等の言語タグで始まるメッセージ）
             if re.match(r'^\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]\s', original_content):
                 if self.config.get("debug", False):
