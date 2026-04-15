@@ -52,6 +52,7 @@ class KickAuthManager:
         self._callback_server: Optional[HTTPServer] = None
         self._callback_server_v6: Optional[HTTPServer] = None
         self._aiohttp_session: Optional[Any] = None  # 再利用可能なHTTPセッション
+        self._session_loop: Optional[Any] = None  # セッションが属するイベントループ
         self._is_refreshing = False  # リフレッシュ中フラグ（二重リフレッシュ防止）
 
     def is_authenticated(self) -> bool:
@@ -126,9 +127,19 @@ class KickAuthManager:
         return self._refresh_access_token()
 
     async def _get_session(self) -> 'aiohttp.ClientSession':
-        """再利用可能なaiohttpセッションを取得"""
-        if self._aiohttp_session is None or self._aiohttp_session.closed:
+        """再利用可能なaiohttpセッションを取得（ループ変更時は再作成）"""
+        current_loop = asyncio.get_running_loop()
+        # ループが変わった場合は古いセッションを破棄して再作成
+        if (self._aiohttp_session is None
+                or self._aiohttp_session.closed
+                or self._session_loop is not current_loop):
+            if self._aiohttp_session and not self._aiohttp_session.closed:
+                try:
+                    await self._aiohttp_session.close()
+                except Exception:
+                    pass
             self._aiohttp_session = aiohttp.ClientSession()
+            self._session_loop = current_loop
         return self._aiohttp_session
 
     def start_auth_flow(self, callback: Optional[Callable[[bool, str], None]] = None):
@@ -462,17 +473,8 @@ h1{{color:#53fc18;}}</style></head>
         self.refresh_token = ""
         self.token_expires_at = 0
         # HTTPセッションを閉じる
-        if self._aiohttp_session and not self._aiohttp_session.closed:
-            try:
-                # イベントループがあれば非同期で閉じる
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.ensure_future(self._aiohttp_session.close())
-                else:
-                    loop.run_until_complete(self._aiohttp_session.close())
-            except Exception:
-                pass
-            self._aiohttp_session = None
+        self._aiohttp_session = None
+        self._session_loop = None
         # コールバックサーバーを停止
         for server in [self._callback_server, self._callback_server_v6]:
             if server:
