@@ -6,6 +6,7 @@ Kick OAuth 2.1 + PKCE 認証マネージャー
 Kick.comのOAuth認証フロー、トークン管理、チャット投稿を担当
 """
 
+import asyncio
 import hashlib
 import base64
 import secrets
@@ -50,6 +51,8 @@ class KickAuthManager:
         self.token_expires_at = config.get("kick_token_expires_at", 0)
         self._callback_server: Optional[HTTPServer] = None
         self._callback_server_v6: Optional[HTTPServer] = None
+        self._aiohttp_session: Optional[Any] = None  # 再利用可能なHTTPセッション
+        self._is_refreshing = False  # リフレッシュ中フラグ（二重リフレッシュ防止）
 
     def is_authenticated(self) -> bool:
         """認証済みかチェック"""
@@ -62,6 +65,71 @@ class KickAuthManager:
                 return self._refresh_access_token()
             return False
         return True
+
+    def _needs_refresh(self) -> bool:
+        """トークンが期限切れ or 期限切れ間近（5分前）かチェック"""
+        if not self.access_token or not self.token_expires_at:
+            return False
+        return time.time() >= (self.token_expires_at - 300)  # 5分前から先行リフレッシュ
+
+    async def _ensure_valid_token(self) -> bool:
+        """トークンの有効性を確認し、必要ならリフレッシュ（非同期版）"""
+        if not self.access_token:
+            return False
+        if not self._needs_refresh():
+            return True
+        if self._is_refreshing:
+            # 別のリフレッシュが進行中なら少し待って再チェック
+            for _ in range(10):
+                await asyncio.sleep(0.5)
+                if not self._is_refreshing:
+                    return bool(self.access_token)
+            return bool(self.access_token)
+        return await self._async_refresh_token()
+
+    async def _async_refresh_token(self) -> bool:
+        """非同期でトークンをリフレッシュ"""
+        if not self.refresh_token or not self.client_id:
+            return False
+        self._is_refreshing = True
+        try:
+            session = await self._get_session()
+            data = {
+                "grant_type": "refresh_token",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": self.refresh_token,
+            }
+            async with session.post(
+                KICK_OAUTH_TOKEN_URL,
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200:
+                    tokens = await resp.json()
+                    self.access_token = tokens.get("access_token", "")
+                    new_refresh = tokens.get("refresh_token", "")
+                    if new_refresh:
+                        self.refresh_token = new_refresh
+                    expires_in = tokens.get("expires_in", 3600)
+                    self.token_expires_at = time.time() + expires_in - 60
+                    print(f"[INFO] Kickトークンリフレッシュ成功（非同期）")
+                    return True
+                else:
+                    body = await resp.text()
+                    print(f"[ERROR] Kickトークンリフレッシュ失敗: HTTP {resp.status}: {body}")
+        except Exception as e:
+            print(f"[ERROR] Kickトークン非同期リフレッシュエラー: {e}")
+        finally:
+            self._is_refreshing = False
+        # 非同期リフレッシュ失敗時は同期版にフォールバック
+        return self._refresh_access_token()
+
+    async def _get_session(self) -> 'aiohttp.ClientSession':
+        """再利用可能なaiohttpセッションを取得"""
+        if self._aiohttp_session is None or self._aiohttp_session.closed:
+            self._aiohttp_session = aiohttp.ClientSession()
+        return self._aiohttp_session
 
     def start_auth_flow(self, callback: Optional[Callable[[bool, str], None]] = None):
         """OAuth 2.1 + PKCE 認証フローを開始
@@ -319,12 +387,14 @@ h1{{color:#53fc18;}}</style></head>
         self.access_token = ""
         return False
 
-    async def send_chat_message(self, broadcaster_user_id: int, content: str) -> Tuple[bool, Optional[str]]:
+    async def send_chat_message(self, broadcaster_user_id: int, content: str,
+                               _retry: bool = False) -> Tuple[bool, Optional[str]]:
         """Kickチャットにメッセージを投稿
 
         Args:
             broadcaster_user_id: 配信者のユーザーID
             content: メッセージ内容
+            _retry: 内部用リトライフラグ
 
         Returns:
             (成功フラグ, エラーメッセージ)
@@ -332,10 +402,9 @@ h1{{color:#53fc18;}}</style></head>
         if not self.access_token:
             return False, "未認証"
 
-        # トークン期限チェック
-        if self.token_expires_at > 0 and time.time() >= self.token_expires_at:
-            if not self._refresh_access_token():
-                return False, "トークン期限切れ（リフレッシュ失敗）"
+        # 非同期でトークン有効性を確認（先行リフレッシュ対応）
+        if not await self._ensure_valid_token():
+            return False, "トークン期限切れ（リフレッシュ失敗）"
 
         headers = {
             "Authorization": f"Bearer {self.access_token}",
@@ -353,20 +422,22 @@ h1{{color:#53fc18;}}</style></head>
         print(f"[DEBUG] Kick POST {url} broadcaster_user_id={broadcaster_user_id}")
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    body = await resp.text()
-                    if resp.status in (200, 201):
-                        print(f"[INFO] Kick投稿成功")
-                        return True, None
-                    else:
-                        error_msg = f"HTTP {resp.status}: {body}"
-                        print(f"[WARNING] Kick投稿失敗: {error_msg}")
-                        # 401の場合はトークンをリフレッシュして再試行
-                        if resp.status == 401 and self.refresh_token:
-                            if self._refresh_access_token():
-                                return await self.send_chat_message(broadcaster_user_id, content)
-                        return False, error_msg
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                body = await resp.text()
+                if resp.status in (200, 201):
+                    print(f"[INFO] Kick投稿成功")
+                    return True, None
+                else:
+                    error_msg = f"HTTP {resp.status}: {body}"
+                    print(f"[WARNING] Kick投稿失敗: {error_msg}")
+                    # 401の場合はトークンをリフレッシュして1回だけ再試行
+                    if resp.status == 401 and self.refresh_token and not _retry:
+                        if await self._async_refresh_token():
+                            return await self.send_chat_message(
+                                broadcaster_user_id, content, _retry=True)
+                    return False, error_msg
         except Exception as e:
             print(f"[ERROR] Kick投稿例外: {e}")
             return False, str(e)
@@ -379,11 +450,29 @@ h1{{color:#53fc18;}}</style></head>
             "kick_token_expires_at": self.token_expires_at,
         }
 
+    async def close_session(self):
+        """HTTPセッションを閉じる"""
+        if self._aiohttp_session and not self._aiohttp_session.closed:
+            await self._aiohttp_session.close()
+            self._aiohttp_session = None
+
     def revoke(self):
         """認証情報をクリア"""
         self.access_token = ""
         self.refresh_token = ""
         self.token_expires_at = 0
+        # HTTPセッションを閉じる
+        if self._aiohttp_session and not self._aiohttp_session.closed:
+            try:
+                # イベントループがあれば非同期で閉じる
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(self._aiohttp_session.close())
+                else:
+                    loop.run_until_complete(self._aiohttp_session.close())
+            except Exception:
+                pass
+            self._aiohttp_session = None
         # コールバックサーバーを停止
         for server in [self._callback_server, self._callback_server_v6]:
             if server:
