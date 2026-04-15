@@ -423,11 +423,9 @@ h1{{color:#53fc18;}}</style></head>
         }
         payload = {
             "content": content,
-            "type": "bot",
+            "type": "user",
+            "broadcaster_user_id": broadcaster_user_id,
         }
-        # broadcaster_user_idがある場合のみ付与
-        if broadcaster_user_id:
-            payload["broadcaster_user_id"] = broadcaster_user_id
 
         url = f"{KICK_API_BASE_URL}/public/v1/chat"
         print(f"[DEBUG] Kick POST {url} broadcaster_user_id={broadcaster_user_id}")
