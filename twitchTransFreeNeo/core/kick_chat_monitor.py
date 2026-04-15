@@ -476,16 +476,19 @@ class KickChatMonitor:
             if self.message_callback:
                 self.message_callback(chat_message)
 
-            # TTS読み上げ
-            self._add_tts_messages(chat_message)
-
-            # チャットに投稿（投稿可能な場合）
+            # チャットに投稿（投稿可能な場合）- TTSより先に実行
             if self.can_post and not self.view_only_mode:
                 await self._post_translation(chat_message)
 
+            # TTS読み上げ（投稿をブロックしないようtry/exceptで保護）
+            try:
+                self._add_tts_messages(chat_message)
+            except Exception as tts_e:
+                print(f"[WARNING] Kick TTS処理エラー: {tts_e}")
+
         except Exception as e:
+            print(f"[ERROR] Kickメッセージ処理エラー: {e}")
             if self.config.get("debug", False):
-                print(f"[ERROR] Kickメッセージ処理エラー: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -537,9 +540,10 @@ class KickChatMonitor:
 
     def _clean_message(self, message: str) -> str:
         """メッセージをクリーニング"""
-        import re
-
         cleaned = message
+
+        # Kickエモート除去（[emote:12345:emote_name] 形式）
+        cleaned = re.sub(r'\[emote:\d+:[^\]]*\]', '', cleaned)
 
         # Unicode絵文字除去
         unicode_emojis = distinct_emoji_list(cleaned)
@@ -573,13 +577,13 @@ class KickChatMonitor:
         if self.config.get("tts_in", False):
             tts_text = self._format_tts_text(chat_message, is_input=True)
             if tts_text:
-                self.tts_engine.add_message(tts_text, chat_message.lang)
+                self.tts_engine.put(tts_text, chat_message.lang)
 
         # 出力テキスト読み上げ
         if self.config.get("tts_out", False):
             tts_text = self._format_tts_text(chat_message, is_input=False)
             if tts_text:
-                self.tts_engine.add_message(tts_text, chat_message.target_lang)
+                self.tts_engine.put(tts_text, chat_message.target_lang)
 
     def _format_tts_text(self, chat_message: ChatMessage, is_input: bool = True) -> str:
         """TTS用のテキストをフォーマット"""
