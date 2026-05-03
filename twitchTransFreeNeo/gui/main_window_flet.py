@@ -252,11 +252,11 @@ class MainWindow:
 
     @staticmethod
     def _is_kick_enabled(platform: str) -> bool:
-        return platform in ["kick", "twitch_kick", "youtube_kick", "all"]
+        return platform in ["kick", "twitch_kick", "youtube_kick", "kick_twitcasting", "all"]
 
     @staticmethod
     def _is_twitcasting_enabled(platform: str) -> bool:
-        return platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]
+        return platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "kick_twitcasting", "all"]
 
     def _create_platform_indicator(self, platform: str) -> ft.Container:
         """プラットフォ��ムインジケーターを作成"""
@@ -290,7 +290,7 @@ class MainWindow:
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=4,
             )
-        elif platform in ["both", "twitch_kick", "youtube_kick", "twitch_twitcasting", "youtube_twitcasting", "all"]:
+        elif platform in ["both", "twitch_kick", "youtube_kick", "twitch_twitcasting", "youtube_twitcasting", "kick_twitcasting", "all"]:
             icons = []
             if self._is_twitch_enabled(platform):
                 icons.append(ft.Icon(ft.Icons.LIVE_TV, color=ft.Colors.WHITE, size=14))

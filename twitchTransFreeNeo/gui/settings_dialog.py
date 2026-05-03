@@ -259,6 +259,7 @@ class SettingsDialog:
                 ft.DropdownOption("twitch_twitcasting", "同時配信 (Twitch + TwitCasting)"),
                 ft.DropdownOption("youtube_kick", "同時配信 (YouTube + Kick)"),
                 ft.DropdownOption("youtube_twitcasting", "同時配信 (YouTube + TwitCasting)"),
+                ft.DropdownOption("kick_twitcasting", "同時配信 (Kick + TwitCasting)"),
                 ft.DropdownOption("all", "全プラットフォーム同時"),
             ],
             width=350,
@@ -580,7 +581,7 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="Kickチャンネルに接続するための設定"
             ),
-            visible=(current_platform in ["kick", "twitch_kick", "youtube_kick", "all"]),
+            visible=(current_platform in ["kick", "twitch_kick", "youtube_kick", "kick_twitcasting", "all"]),
         )
 
         # === TwitCasting設定 ===
@@ -653,7 +654,7 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="TwitCastingのコメントを監視するための設定（読み取り専用）"
             ),
-            visible=(current_platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]),
+            visible=(current_platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "kick_twitcasting", "all"]),
         )
 
         # === 共通設定 ===
@@ -770,8 +771,8 @@ class SettingsDialog:
         platform = self.platform_dropdown.value
         self.twitch_container.visible = platform in ["twitch", "both", "twitch_kick", "twitch_twitcasting", "all"]
         self.youtube_container.visible = platform in ["youtube", "both", "youtube_kick", "youtube_twitcasting", "all"]
-        self.kick_container.visible = platform in ["kick", "twitch_kick", "youtube_kick", "all"]
-        self.twitcasting_container.visible = platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]
+        self.kick_container.visible = platform in ["kick", "twitch_kick", "youtube_kick", "kick_twitcasting", "all"]
+        self.twitcasting_container.visible = platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "kick_twitcasting", "all"]
         self.page.update()
 
     def _create_translation_tab(self) -> ft.Container:
