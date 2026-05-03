@@ -62,6 +62,16 @@ else:
 # パスを追加
 sys.path.insert(0, base_path)
 
+# Windows: タスクバーピン留め対応（AppUserModelIDを設定）
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelId(
+            'sayonari.twitchTransFreeNeo'
+        )
+    except Exception:
+        pass
+
 # PyInstallerの場合、標準出力/エラー出力を設定
 # 注: デバッグのためコメントアウト（必要に応じて有効化）
 # if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
