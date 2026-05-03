@@ -125,6 +125,9 @@ class MainWindow:
         # 終了時の処理
         self.page.on_close = self._on_closing
 
+        # ウィンドウイベント（最小化復元時の再描画）
+        self.page.window.on_event = self._on_window_event
+
         # キーボードショートカット設定
         self.page.on_keyboard_event = self._on_keyboard_event
 
@@ -1131,7 +1134,10 @@ class MainWindow:
         for msg in self.filtered_messages[-100:]:  # 最新100件のみ表示
             self.chat_list.controls.append(self._create_message_widget(msg))
 
-        self.page.update()
+        try:
+            self.page.update()
+        except Exception:
+            pass  # 最小化中はpage.updateが失敗する場合がある
 
     def _create_message_widget(self, message: ChatMessage, is_pinned: bool = False) -> ft.Container:
         """メッセージウィジェット作成"""
@@ -1344,7 +1350,10 @@ class MainWindow:
         if self.message_rate_text:
             self.message_rate_text.value = f"{message_rate}/分"
 
-        self.page.update()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _update_lang_stats(self):
         """言語統計を更新"""
@@ -1377,7 +1386,10 @@ class MainWindow:
                     ], spacing=5)
                 )
 
-        self.page.update()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _start_connection_timer(self):
         """接続時間タイマーを開始"""
@@ -1495,7 +1507,10 @@ class MainWindow:
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
         self.log_text.value += log_entry
-        self.page.update()
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _open_settings(self, e):
         """設定画面を開く"""
@@ -1685,6 +1700,16 @@ class MainWindow:
         )
         self.page.open(dialog)
         self.page.update()
+
+    def _on_window_event(self, e):
+        """ウィンドウイベント（最小化復元時に再描画）"""
+        if e.data in ("restore", "focus", "unminimize"):
+            try:
+                self._update_chat_display()
+                self._update_message_stats()
+                self._update_lang_stats()
+            except Exception:
+                pass
 
     def _on_closing(self, e):
         """ウィンドウ終了時"""
