@@ -253,9 +253,12 @@ class SettingsDialog:
                 ft.DropdownOption("twitch", "Twitch のみ"),
                 ft.DropdownOption("youtube", "YouTube Live のみ"),
                 ft.DropdownOption("kick", "Kick のみ"),
+                ft.DropdownOption("twitcasting", "TwitCasting のみ"),
                 ft.DropdownOption("both", "同時配信 (Twitch + YouTube)"),
                 ft.DropdownOption("twitch_kick", "同時配信 (Twitch + Kick)"),
+                ft.DropdownOption("twitch_twitcasting", "同時配信 (Twitch + TwitCasting)"),
                 ft.DropdownOption("youtube_kick", "同時配信 (YouTube + Kick)"),
+                ft.DropdownOption("youtube_twitcasting", "同時配信 (YouTube + TwitCasting)"),
                 ft.DropdownOption("all", "全プラットフォーム同時"),
             ],
             width=350,
@@ -320,7 +323,7 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="チャンネルに接続するために必要な設定です"
             ),
-            visible=(current_platform in ["twitch", "both", "twitch_kick", "all"]),
+            visible=(current_platform in ["twitch", "both", "twitch_kick", "twitch_twitcasting", "all"]),
         )
 
         # === YouTube設定 ===
@@ -450,7 +453,7 @@ class SettingsDialog:
                 ], spacing=8),
                 helper_text="ライブ配信の動画IDと認証設定"
             ),
-            visible=(current_platform in ["youtube", "both", "youtube_kick", "all"]),
+            visible=(current_platform in ["youtube", "both", "youtube_kick", "youtube_twitcasting", "all"]),
         )
 
         # === Kick設定 ===
@@ -580,6 +583,79 @@ class SettingsDialog:
             visible=(current_platform in ["kick", "twitch_kick", "youtube_kick", "all"]),
         )
 
+        # === TwitCasting設定 ===
+        self.twitcasting_user_id_field = ft.TextField(
+            label="ユーザーID (screen_id)",
+            value=self.config.get("twitcasting_user_id", ""),
+            width=300,
+            hint_text="例: twitcasting_jp",
+        )
+        self.twitcasting_client_id_field = ft.TextField(
+            label="Client ID",
+            value=self.config.get("twitcasting_client_id", ""),
+            width=300,
+        )
+        self.twitcasting_client_secret_field = ft.TextField(
+            label="Client Secret",
+            value=self.config.get("twitcasting_client_secret", ""),
+            width=300,
+            password=True,
+            can_reveal_password=True,
+        )
+        self.twitcasting_access_token_field = ft.TextField(
+            label="Access Token（Bearer認証用、Client ID/Secretがあれば不要）",
+            value=self.config.get("twitcasting_access_token", ""),
+            width=300,
+            password=True,
+            can_reveal_password=True,
+        )
+
+        twitcasting_dev_button = ft.OutlinedButton(
+            "TwitCasting Developer Console",
+            icon=ft.Icons.OPEN_IN_NEW,
+            on_click=lambda e: webbrowser.open("https://twitcasting.tv/developer.php"),
+        )
+
+        self.twitcasting_container = ft.Container(
+            content=self._create_settings_card(
+                "TwitCasting接続設定",
+                ft.Icons.CAST,
+                ft.Column([
+                    self.twitcasting_user_id_field,
+                    ft.Text(
+                        "配信者のscreen_id（プロフィールURLの末尾）を入力\n例: https://twitcasting.tv/twitcasting_jp → twitcasting_jp",
+                        size=11, color=ft.Colors.GREY_600,
+                    ),
+                    ft.Divider(),
+                    ft.Text("API認証（いずれか一方を設定）", weight=ft.FontWeight.W_500, size=13),
+                    ft.Text(
+                        "Access Token を設定するか、Client ID + Client Secret のペアを設定してください\n読み取り専用（コメント投稿不可）",
+                        size=11, color=ft.Colors.GREY_600,
+                    ),
+                    self.twitcasting_access_token_field,
+                    ft.Divider(),
+                    self.twitcasting_client_id_field,
+                    self.twitcasting_client_secret_field,
+                    ft.Divider(),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("TwitCasting Developer Console", weight=ft.FontWeight.W_500, size=12),
+                            ft.Text(
+                                "Client IDとClient Secretを取得するには、\nTwitCasting Developer Consoleでアプリを登録してください。",
+                                size=11, color=ft.Colors.GREY_600,
+                            ),
+                            twitcasting_dev_button,
+                        ], spacing=4),
+                        bgcolor=ft.Colors.with_opacity(0.03, ft.Colors.BLUE),
+                        padding=10,
+                        border_radius=4,
+                    ),
+                ], spacing=8),
+                helper_text="TwitCastingのコメントを監視するための設定（読み取り専用）"
+            ),
+            visible=(current_platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]),
+        )
+
         # === 共通設定 ===
         self.color_dropdown = ft.Dropdown(
             label="翻訳テキストの色",
@@ -647,6 +723,7 @@ class SettingsDialog:
                 self.twitch_container,
                 self.youtube_container,
                 self.kick_container,
+                self.twitcasting_container,
                 display_card,
                 misc_card,
             ], scroll=ft.ScrollMode.ALWAYS, spacing=12),
@@ -691,9 +768,10 @@ class SettingsDialog:
     def _on_platform_change(self):
         """プラットフォーム変更時のハンドラ"""
         platform = self.platform_dropdown.value
-        self.twitch_container.visible = platform in ["twitch", "both", "twitch_kick", "all"]
-        self.youtube_container.visible = platform in ["youtube", "both", "youtube_kick", "all"]
+        self.twitch_container.visible = platform in ["twitch", "both", "twitch_kick", "twitch_twitcasting", "all"]
+        self.youtube_container.visible = platform in ["youtube", "both", "youtube_kick", "youtube_twitcasting", "all"]
         self.kick_container.visible = platform in ["kick", "twitch_kick", "youtube_kick", "all"]
+        self.twitcasting_container.visible = platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]
         self.page.update()
 
     def _create_translation_tab(self) -> ft.Container:
@@ -1279,6 +1357,12 @@ class SettingsDialog:
             updated["kick_chatroom_id"] = 0
         updated["kick_client_id"] = self.kick_client_id_field.value.strip()
         updated["kick_client_secret"] = self.kick_client_secret_field.value.strip()
+
+        # TwitCasting設定
+        updated["twitcasting_user_id"] = self.twitcasting_user_id_field.value.strip()
+        updated["twitcasting_client_id"] = self.twitcasting_client_id_field.value.strip()
+        updated["twitcasting_client_secret"] = self.twitcasting_client_secret_field.value.strip()
+        updated["twitcasting_access_token"] = self.twitcasting_access_token_field.value.strip()
 
         # 表示設定
         updated["trans_text_color"] = self.color_dropdown.value

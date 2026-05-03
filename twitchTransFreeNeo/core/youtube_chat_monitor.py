@@ -260,7 +260,8 @@ class YouTubeChatMonitor:
             text=original_content,
             timestamp=timestamp,
             lang=detected_lang,
-            translation=translated_text
+            translation=translated_text,
+            platform="youtube"
         )
 
         # cleaned_contentとtarget_langを設定

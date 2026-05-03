@@ -465,7 +465,8 @@ class KickChatMonitor:
                 text=original_content,
                 timestamp=timestamp,
                 lang=detected_lang,
-                translation=translated_text
+                translation=translated_text,
+                platform="kick"
             )
 
             # cleaned_contentとtarget_langを設定

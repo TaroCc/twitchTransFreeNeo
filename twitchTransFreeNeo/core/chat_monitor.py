@@ -33,14 +33,15 @@ except ImportError:
 class ChatMessage:
     """チャットメッセージクラス"""
     
-    def __init__(self, user: str, text: str, timestamp, lang: str = "", translation: str = ""):
+    def __init__(self, user: str, text: str, timestamp, lang: str = "", translation: str = "", platform: str = ""):
         from datetime import datetime
         self.user = user
         self.text = text
         self.timestamp = timestamp if hasattr(timestamp, 'strftime') else datetime.now()
         self.lang = lang
         self.translation = translation
-        
+        self.platform = platform  # "twitch", "youtube", "kick", "twitcasting"
+
         # 追加の属性
         self.is_translated = bool(translation)  # 翻訳済みかどうか
         self.cleaned_content = text  # クリーンアップされたコンテンツ（デフォルトは元のテキスト）
@@ -310,7 +311,8 @@ if TWITCHIO_AVAILABLE:
                 text=original_content,
                 timestamp=timestamp,
                 lang=detected_lang,
-                translation=translated_text
+                translation=translated_text,
+                platform="twitch"
             )
             
             # cleaned_contentとtarget_langを設定

@@ -144,6 +144,13 @@ class ConfigManager:
             "kick_token_expires_at": 0,
             "kick_post_interval": 2.0,
 
+            # TwitCasting設定
+            "twitcasting_user_id": "",
+            "twitcasting_client_id": "",
+            "twitcasting_client_secret": "",
+            "twitcasting_access_token": "",
+            "twitcasting_polling_interval": 3.0,
+
             # その他
             "view_only_mode": False,
             "debug": False,

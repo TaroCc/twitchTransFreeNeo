@@ -13,6 +13,7 @@ try:
     from ..core.chat_monitor import ChatMonitor, ChatMessage
     from ..core.youtube_chat_monitor import YouTubeChatMonitor, PYTCHAT_AVAILABLE
     from ..core.kick_chat_monitor import KickChatMonitor, WEBSOCKETS_AVAILABLE as KICK_AVAILABLE
+    from ..core.twitcasting_chat_monitor import TwitCastingChatMonitor, TWITCASTING_AVAILABLE
     from .settings_dialog import SettingsDialog
 except ImportError:
     from twitchTransFreeNeo.utils.config_manager import ConfigManager
@@ -20,6 +21,7 @@ except ImportError:
     from twitchTransFreeNeo.core.chat_monitor import ChatMonitor, ChatMessage
     from twitchTransFreeNeo.core.youtube_chat_monitor import YouTubeChatMonitor, PYTCHAT_AVAILABLE
     from twitchTransFreeNeo.core.kick_chat_monitor import KickChatMonitor, WEBSOCKETS_AVAILABLE as KICK_AVAILABLE
+    from twitchTransFreeNeo.core.twitcasting_chat_monitor import TwitCastingChatMonitor, TWITCASTING_AVAILABLE
     from twitchTransFreeNeo.gui.settings_dialog import SettingsDialog
 
 class MainWindow:
@@ -30,6 +32,7 @@ class MainWindow:
         self.chat_monitor: Optional[ChatMonitor] = None
         self.youtube_monitor: Optional[YouTubeChatMonitor] = None
         self.kick_monitor: Optional[KickChatMonitor] = None
+        self.twitcasting_monitor: Optional[TwitCastingChatMonitor] = None
         self.is_connected = False
         self.page: Optional[ft.Page] = None
 
@@ -53,6 +56,7 @@ class MainWindow:
         self.twitch_status_icon: Optional[ft.Icon] = None
         self.youtube_status_icon: Optional[ft.Icon] = None
         self.kick_status_icon: Optional[ft.Icon] = None
+        self.twitcasting_status_icon: Optional[ft.Icon] = None
 
         # データ
         self.messages: List[ChatMessage] = []
@@ -240,18 +244,22 @@ class MainWindow:
 
     @staticmethod
     def _is_twitch_enabled(platform: str) -> bool:
-        return platform in ["twitch", "both", "twitch_kick", "all"]
+        return platform in ["twitch", "both", "twitch_kick", "twitch_twitcasting", "all"]
 
     @staticmethod
     def _is_youtube_enabled(platform: str) -> bool:
-        return platform in ["youtube", "both", "youtube_kick", "all"]
+        return platform in ["youtube", "both", "youtube_kick", "youtube_twitcasting", "all"]
 
     @staticmethod
     def _is_kick_enabled(platform: str) -> bool:
         return platform in ["kick", "twitch_kick", "youtube_kick", "all"]
 
+    @staticmethod
+    def _is_twitcasting_enabled(platform: str) -> bool:
+        return platform in ["twitcasting", "twitch_twitcasting", "youtube_twitcasting", "all"]
+
     def _create_platform_indicator(self, platform: str) -> ft.Container:
-        """プラットフォームインジケーターを作成"""
+        """プラットフォ��ムインジケーターを作成"""
         if platform == "youtube":
             return ft.Container(
                 content=ft.Row([
@@ -272,7 +280,17 @@ class MainWindow:
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=4,
             )
-        elif platform in ["both", "twitch_kick", "youtube_kick", "all"]:
+        elif platform == "twitcasting":
+            return ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.CAST, color=ft.Colors.WHITE, size=16),
+                    ft.Text("TwitCasting", color=ft.Colors.WHITE, size=12, weight=ft.FontWeight.BOLD),
+                ], spacing=4),
+                bgcolor=ft.Colors.BLUE_700,
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                border_radius=4,
+            )
+        elif platform in ["both", "twitch_kick", "youtube_kick", "twitch_twitcasting", "youtube_twitcasting", "all"]:
             icons = []
             if self._is_twitch_enabled(platform):
                 icons.append(ft.Icon(ft.Icons.LIVE_TV, color=ft.Colors.WHITE, size=14))
@@ -284,6 +302,10 @@ class MainWindow:
                 if icons:
                     icons.append(ft.Text("+", color=ft.Colors.WHITE, size=10))
                 icons.append(ft.Icon(ft.Icons.SPORTS_ESPORTS, color=ft.Colors.WHITE, size=14))
+            if self._is_twitcasting_enabled(platform):
+                if icons:
+                    icons.append(ft.Text("+", color=ft.Colors.WHITE, size=10))
+                icons.append(ft.Icon(ft.Icons.CAST, color=ft.Colors.WHITE, size=14))
             icons.append(ft.Text("同時配信", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD))
             return ft.Container(
                 content=ft.Row(icons, spacing=2),
@@ -800,6 +822,13 @@ class MainWindow:
             ], spacing=2),
             visible=False,
         )
+        self.twitcasting_status_icon = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.CAST, size=14, color=ft.Colors.GREY_500),
+                ft.Text("TwitCasting", size=10, color=ft.Colors.GREY_500),
+            ], spacing=2),
+            visible=False,
+        )
 
         return ft.Container(
             content=ft.Row([
@@ -809,6 +838,7 @@ class MainWindow:
                 self.twitch_status_icon,
                 self.youtube_status_icon,
                 self.kick_status_icon,
+                self.twitcasting_status_icon,
                 ft.Container(expand=True),
                 ft.Text("Ctrl+R: 接続 | Ctrl+,: 設定 | Ctrl+E: 出力 | F1: ヘルプ", size=10, color=ft.Colors.GREY_500),
             ], spacing=5),
@@ -854,6 +884,7 @@ class MainWindow:
             twitch_success = True
             youtube_success = True
             kick_success = True
+            twitcasting_success = True
             status_parts = []
 
             # Twitch接続
@@ -932,8 +963,37 @@ class MainWindow:
                             )
                             return
 
+            # TwitCasting接続
+            if self._is_twitcasting_enabled(platform):
+                if not TWITCASTING_AVAILABLE:
+                    twitcasting_success = False
+                    self._log_message("TwitCasting接続エラー: aiohttpが利用できません")
+                    if platform == "twitcasting":
+                        await self._show_error_dialog(
+                            "TwitCasting接続エラー",
+                            "aiohttpライブラリが利用できません",
+                            hint="pip install aiohttp を実行してください。"
+                        )
+                        return
+                else:
+                    self.twitcasting_monitor = TwitCastingChatMonitor(config, self._on_message_received)
+                    if self.twitcasting_monitor.start():
+                        user_id = config.get("twitcasting_user_id", "")
+                        status_parts.append(f"TwitCasting: {user_id} (読み取り専用)")
+                        self._log_message(f"TwitCasting '{user_id}' に接続しました (読み取り専用)")
+                    else:
+                        twitcasting_success = False
+                        self._log_message("TwitCasting接続エラー: 接続に失敗しました")
+                        if platform == "twitcasting":
+                            await self._show_error_dialog(
+                                "TwitCasting接続エラー",
+                                "TwitCastingへの接続に失敗しました",
+                                hint="ユーザーIDと認証情報（Access TokenまたはClient ID/Secret）を確認してください。"
+                            )
+                            return
+
             # 少なくとも1つ成功していれば接続状態とする
-            if twitch_success or youtube_success or kick_success:
+            if twitch_success or youtube_success or kick_success or twitcasting_success:
                 self.is_connected = True
                 self.connect_button.text = "接続停止"
                 self.connect_button.icon = ft.Icons.STOP
@@ -960,6 +1020,11 @@ class MainWindow:
                     self.kick_status_icon.visible = True
                     self.kick_status_icon.content.controls[0].color = ft.Colors.GREEN_700
                     self.kick_status_icon.content.controls[1].color = ft.Colors.GREEN_700
+
+                if self._is_twitcasting_enabled(platform) and twitcasting_success:
+                    self.twitcasting_status_icon.visible = True
+                    self.twitcasting_status_icon.content.controls[0].color = ft.Colors.BLUE_700
+                    self.twitcasting_status_icon.content.controls[1].color = ft.Colors.BLUE_700
 
                 self.page.update()
             else:
@@ -996,6 +1061,12 @@ class MainWindow:
         if self._is_kick_enabled(platform):
             if not config.get("kick_channel_slug") and not config.get("kick_chatroom_id"):
                 errors.append("Kickチャンネルスラッグまたはchatroom IDが設定されていません")
+
+        if self._is_twitcasting_enabled(platform):
+            if not config.get("twitcasting_user_id"):
+                errors.append("TwitCastingユーザーIDが設定されていません")
+            if not config.get("twitcasting_access_token") and not (config.get("twitcasting_client_id") and config.get("twitcasting_client_secret")):
+                errors.append("TwitCasting認証情報が設定されていません（Access TokenまたはClient ID/Secret）")
 
         return (len(errors) == 0, errors)
 
@@ -1037,6 +1108,11 @@ class MainWindow:
                 self.kick_monitor.stop()
                 self.kick_monitor = None
 
+            # TwitCastingモニターを停止
+            if self.twitcasting_monitor:
+                self.twitcasting_monitor.stop()
+                self.twitcasting_monitor = None
+
             self.is_connected = False
             self.connect_button.text = "接続開始"
             self.connect_button.icon = ft.Icons.PLAY_ARROW
@@ -1057,6 +1133,8 @@ class MainWindow:
                 self.youtube_status_icon.visible = False
             if self.kick_status_icon:
                 self.kick_status_icon.visible = False
+            if self.twitcasting_status_icon:
+                self.twitcasting_status_icon.visible = False
 
             # メッセージレートをリセット
             self.message_timestamps.clear()
@@ -1190,6 +1268,14 @@ class MainWindow:
         # ユーザー名の色（お気に入りは金色）
         username_color = ft.Colors.AMBER_700 if is_favorite else None
 
+        # プラットフォームバッジ
+        platform_badge_map = {
+            "twitch": ("Tw", ft.Colors.PURPLE_500),
+            "youtube": ("YT", ft.Colors.RED_700),
+            "kick": ("Kk", ft.Colors.GREEN_700),
+            "twitcasting": ("TC", ft.Colors.BLUE_700),
+        }
+
         # メッセージカード
         header_row = ft.Row([
             ft.Text(
@@ -1198,6 +1284,19 @@ class MainWindow:
                 color=ft.Colors.GREY,
             ),
         ], spacing=5)
+
+        # プラットフォームバッジ表示
+        platform_key = getattr(message, "platform", "")
+        if platform_key in platform_badge_map:
+            abbr, badge_color = platform_badge_map[platform_key]
+            header_row.controls.append(
+                ft.Container(
+                    content=ft.Text(abbr, size=9, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),
+                    bgcolor=badge_color,
+                    padding=ft.padding.symmetric(horizontal=4, vertical=1),
+                    border_radius=3,
+                )
+            )
 
         # お気に入りアイコン
         if is_favorite:
