@@ -1702,12 +1702,15 @@ class MainWindow:
         self.page.update()
 
     def _on_window_event(self, e):
-        """ウィンドウイベント（最小化復元時に再描画）"""
-        if e.data in ("restore", "focus", "unminimize"):
+        """ウィンドウイベント（最小化復元時に再描画+フォーカス復帰）"""
+        if e.data in ("restore", "unminimize"):
             try:
-                self._update_chat_display()
+                # 表示を最新状態に更新
+                self._apply_filters(None)
                 self._update_message_stats()
                 self._update_lang_stats()
+                # キーボードフォーカスを復帰
+                self.page.window.to_front()
             except Exception:
                 pass
 
